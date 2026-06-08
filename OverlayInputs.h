@@ -45,10 +45,13 @@ class OverlayInputs : public Overlay
 
         virtual void onConfigChanged()
         {
-            // Width might have changed, reset tracker values
+            // Width might have changed, reset tracker values. The ring's write head must be
+            // reset too: the buffers were just resized, so any previous head index could now
+            // be out of range. Starting from 0 over the (zero-initialized) buffers is correct.
             m_throttleVtx.resize( m_width );
             m_brakeVtx.resize( m_width );
             m_steerVtx.resize( m_width );
+            m_head = 0;
             for( int i=0; i<m_width; ++i )
             {
                 m_throttleVtx[i].x = float(i);
@@ -62,7 +65,8 @@ class OverlayInputs : public Overlay
             const float w = (float)m_width;
             const float h = (float)m_height;
 
-            // Make code below safe against indexing into size-1 when sizes are zero
+            // Make code below safe against indexing into size-1 when sizes are zero.
+            // (Preserves the original guard: a zero-width trace would underflow the loops.)
             if( m_throttleVtx.empty() )
                 m_throttleVtx.resize( 1 );
             if( m_brakeVtx.empty() )
@@ -70,19 +74,29 @@ class OverlayInputs : public Overlay
             if( m_steerVtx.empty() )
                 m_steerVtx.resize( 1 );
 
-            // Advance input vertices
+            // Advance input vertices.
+            //
+            // Ring buffer instead of an O(width) left-shift: each frame we drop the single
+            // oldest sample and append one newest sample, so the work is O(1) per channel.
+            //
+            // m_head is the index of the OLDEST sample. Logical order (oldest -> newest) is
+            //   position j  ->  physical slot (m_head + j) % N,  for j in [0, N).
+            // To append a new newest sample we overwrite the current oldest slot (m_head)
+            // and then advance m_head by one; the slot we just wrote becomes logical position
+            // N-1 (the newest), and the next slot becomes the new oldest. The three channel
+            // buffers are always the same size, so they share m_head.
+            //
+            // Worked example (N=3, slots [a,b,c] with a oldest, head=0): append d ->
+            //   write d to slot 0 -> [d,b,c]; head=1. Logical order = slot1,slot2,slot0 = b,c,d.
+            // The oldest (a) is dropped, d is newest. Correct, no element duplicated/skipped.
             {
-                for( int i=0; i<(int)m_throttleVtx.size()-1; ++i )
-                    m_throttleVtx[i].y = m_throttleVtx[i+1].y;
-                m_throttleVtx[(int)m_throttleVtx.size()-1].y = ir_Throttle.getFloat();
-
-                for( int i=0; i<(int)m_brakeVtx.size()-1; ++i )
-                    m_brakeVtx[i].y = m_brakeVtx[i+1].y;
-                m_brakeVtx[(int)m_brakeVtx.size()-1].y = ir_Brake.getFloat();
-
-                for( int i=0; i<(int)m_steerVtx.size()-1; ++i )
-                    m_steerVtx[i].y = m_steerVtx[i+1].y;
-                m_steerVtx[(int)m_steerVtx.size()-1].y = std::min( 1.0f, std::max( 0.0f, (ir_SteeringWheelAngle.getFloat() / ir_SteeringWheelAngleMax.getFloat()) * -0.5f + 0.5f) );
+                const size_t n = m_throttleVtx.size();   // all three vectors share this size
+                if( m_head >= n )                          // safety: keep head in range if a
+                    m_head = 0;                            // resize/empty-guard shrank the buffers
+                m_throttleVtx[m_head].y = ir_Throttle.getFloat();
+                m_brakeVtx[m_head].y    = ir_Brake.getFloat();
+                m_steerVtx[m_head].y    = std::min( 1.0f, std::max( 0.0f, (ir_SteeringWheelAngle.getFloat() / ir_SteeringWheelAngleMax.getFloat()) * -0.5f + 0.5f) );
+                m_head = ( m_head + 1 ) % n;
             }
 
             const float thickness = g_cfg.getFloat( m_name, "line_thickness", 2.0f );
@@ -90,62 +104,73 @@ class OverlayInputs : public Overlay
                 return float2( v.x+0.5f, h-0.5f*thickness - v.y*(h-thickness) );
             };
 
+            // Map a logical position j (0 = oldest .. N-1 = newest) to a screen-space vertex.
+            // The x coordinate is the logical column j (independent of the physical ring slot),
+            // and the y is the sample stored in the physical slot (m_head + j) % N. This is the
+            // ring-buffer read in oldest->newest order; it reproduces exactly what the old
+            // left-shift produced (slot 0 = oldest at x=0 .. slot N-1 = newest at x=N-1).
+            const int n = (int)m_throttleVtx.size();   // all three vectors share this size
+            auto ringCoord = [&]( const std::vector<float2>& buf, int j )->float2 {
+                const int phys = ( (int)m_head + j ) % n;
+                return vtx2coord( float2( float(j), buf[phys].y ) );
+            };
+
             // Throttle (fill)
             Microsoft::WRL::ComPtr<ID2D1PathGeometry1> throttleFillPath;
             Microsoft::WRL::ComPtr<ID2D1GeometrySink>  throttleFillSink;
-            m_d2dFactory->CreatePathGeometry( &throttleFillPath );
-            throttleFillPath->Open( &throttleFillSink );
+            HRCHECK( m_d2dFactory->CreatePathGeometry( &throttleFillPath ) );
+            HRCHECK( throttleFillPath->Open( &throttleFillSink ) );
             throttleFillSink->BeginFigure( float2(0,h), D2D1_FIGURE_BEGIN_FILLED );
-            for( int i=0; i<(int)m_throttleVtx.size(); ++i )
-                throttleFillSink->AddLine( vtx2coord(m_throttleVtx[i]) );
-            throttleFillSink->AddLine( float2(m_throttleVtx[m_throttleVtx.size()-1].x+0.5f,h) );
+            for( int j=0; j<n; ++j )
+                throttleFillSink->AddLine( ringCoord(m_throttleVtx,j) );
+            throttleFillSink->AddLine( float2(float(n-1)+0.5f,h) );
             throttleFillSink->EndFigure( D2D1_FIGURE_END_OPEN );
-            throttleFillSink->Close();
+            HRCHECK( throttleFillSink->Close() );
 
             // Brake (fill)
             Microsoft::WRL::ComPtr<ID2D1PathGeometry1> brakeFillPath;
             Microsoft::WRL::ComPtr<ID2D1GeometrySink>  brakeFillSink;
-            m_d2dFactory->CreatePathGeometry( &brakeFillPath );
-            brakeFillPath->Open( &brakeFillSink );
+            HRCHECK( m_d2dFactory->CreatePathGeometry( &brakeFillPath ) );
+            HRCHECK( brakeFillPath->Open( &brakeFillSink ) );
             brakeFillSink->BeginFigure( float2(0,h), D2D1_FIGURE_BEGIN_FILLED );
-            for( int i=0; i<(int)m_brakeVtx.size(); ++i )
-                brakeFillSink->AddLine( vtx2coord(m_brakeVtx[i]) );
-            brakeFillSink->AddLine( float2(m_brakeVtx[m_brakeVtx.size()-1].x+0.5f,h) );
+            for( int j=0; j<n; ++j )
+                brakeFillSink->AddLine( ringCoord(m_brakeVtx,j) );
+            brakeFillSink->AddLine( float2(float(n-1)+0.5f,h) );
             brakeFillSink->EndFigure( D2D1_FIGURE_END_OPEN );
-            brakeFillSink->Close();
+            HRCHECK( brakeFillSink->Close() );
 
             // Throttle (line)
             Microsoft::WRL::ComPtr<ID2D1PathGeometry1> throttleLinePath;
             Microsoft::WRL::ComPtr<ID2D1GeometrySink>  throttleLineSink;
-            m_d2dFactory->CreatePathGeometry( &throttleLinePath );
-            throttleLinePath->Open( &throttleLineSink );
-            throttleLineSink->BeginFigure( vtx2coord(m_throttleVtx[0]), D2D1_FIGURE_BEGIN_HOLLOW );
-            for( int i=1; i<(int)m_throttleVtx.size(); ++i )
-                throttleLineSink->AddLine( vtx2coord(m_throttleVtx[i]) );
+            HRCHECK( m_d2dFactory->CreatePathGeometry( &throttleLinePath ) );
+            HRCHECK( throttleLinePath->Open( &throttleLineSink ) );
+            throttleLineSink->BeginFigure( ringCoord(m_throttleVtx,0), D2D1_FIGURE_BEGIN_HOLLOW );
+            for( int j=1; j<n; ++j )
+                throttleLineSink->AddLine( ringCoord(m_throttleVtx,j) );
             throttleLineSink->EndFigure( D2D1_FIGURE_END_OPEN );
-            throttleLineSink->Close();
+            HRCHECK( throttleLineSink->Close() );
 
             // Brake (line)
             Microsoft::WRL::ComPtr<ID2D1PathGeometry1> brakeLinePath;
             Microsoft::WRL::ComPtr<ID2D1GeometrySink>  brakeLineSink;
-            m_d2dFactory->CreatePathGeometry( &brakeLinePath );
-            brakeLinePath->Open( &brakeLineSink );
-            brakeLineSink->BeginFigure( vtx2coord(m_brakeVtx[0]), D2D1_FIGURE_BEGIN_HOLLOW );
-            for( int i=1; i<(int)m_brakeVtx.size(); ++i )
-                brakeLineSink->AddLine( vtx2coord(m_brakeVtx[i]) );
+            HRCHECK( m_d2dFactory->CreatePathGeometry( &brakeLinePath ) );
+            HRCHECK( brakeLinePath->Open( &brakeLineSink ) );
+            brakeLineSink->BeginFigure( ringCoord(m_brakeVtx,0), D2D1_FIGURE_BEGIN_HOLLOW );
+            for( int j=1; j<n; ++j )
+                brakeLineSink->AddLine( ringCoord(m_brakeVtx,j) );
             brakeLineSink->EndFigure( D2D1_FIGURE_END_OPEN );
-            brakeLineSink->Close();
+            HRCHECK( brakeLineSink->Close() );
 
             // Steering
             Microsoft::WRL::ComPtr<ID2D1PathGeometry1> steeringLinePath;
             Microsoft::WRL::ComPtr<ID2D1GeometrySink>  steeringLineSink;
-            m_d2dFactory->CreatePathGeometry( &steeringLinePath );
-            steeringLinePath->Open( &steeringLineSink );
-            steeringLineSink->BeginFigure( vtx2coord(m_steerVtx[0]), D2D1_FIGURE_BEGIN_HOLLOW );
-            for( int i=1; i<(int)m_steerVtx.size(); ++i )
-                steeringLineSink->AddLine( vtx2coord(m_steerVtx[i]) );
+            HRCHECK( m_d2dFactory->CreatePathGeometry( &steeringLinePath ) );
+            HRCHECK( steeringLinePath->Open( &steeringLineSink ) );
+            steeringLineSink->BeginFigure( ringCoord(m_steerVtx,0), D2D1_FIGURE_BEGIN_HOLLOW );
+            for( int j=1; j<n; ++j )
+                steeringLineSink->AddLine( ringCoord(m_steerVtx,j) );
             steeringLineSink->EndFigure( D2D1_FIGURE_END_OPEN );
-            steeringLineSink->Close();
+            HRCHECK( steeringLineSink->Close() );
 
             m_renderTarget->BeginDraw();
             m_brush->SetColor( g_cfg.getFloat4( m_name, "throttle_fill_col", float4(0.2f,0.45f,0.15f,0.6f) ) );
@@ -166,4 +191,8 @@ class OverlayInputs : public Overlay
         std::vector<float2> m_throttleVtx;
         std::vector<float2> m_brakeVtx;
         std::vector<float2> m_steerVtx;
+
+        // Ring-buffer write head shared by the three trace buffers (they are always the same
+        // size). Index of the OLDEST sample; see onUpdate() for the wrap/append reasoning.
+        size_t m_head = 0;
 };
