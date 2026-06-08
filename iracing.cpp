@@ -485,7 +485,7 @@ ConnectionStatus ir_tick()
         {
             sprintf( path, "QualifyResultsInfo:Results:Position:{%d}CarIdx:", pos );
             int carIdx = -1;
-            if( parseYamlInt( sessionYaml, path, &carIdx ) ) {
+            if( parseYamlInt( sessionYaml, path, &carIdx ) && carIdx >= 0 && carIdx < IR_MAX_CARS ) {
                 ir_session.cars[carIdx].qualPosition = pos + 1;
 
                 sprintf( path, "QualifyResultsInfo:Results:Position:{%d}FastestTime:", pos );
@@ -514,7 +514,7 @@ ConnectionStatus ir_tick()
             {
                 int carIdx = -1;
                 sprintf( path, "SessionInfo:Sessions:SessionNum:{%d}ResultsPositions:Position:{%d}CarIdx:", session, pos );
-                if( parseYamlInt( sessionYaml, path, &carIdx ) )
+                if( parseYamlInt( sessionYaml, path, &carIdx ) && carIdx >= 0 && carIdx < IR_MAX_CARS )
                 {
                     if( sessionNameStr == "PRACTICE" )
                         ir_session.cars[carIdx].practicePosition = pos;
@@ -599,6 +599,8 @@ float ir_estimateLaptime()
     float best = ir_LapBestLapTime.getFloat();
     if( best > 0 )
         return best;
+    if( ir_session.driverCarIdx < 0 || ir_session.driverCarIdx >= IR_MAX_CARS )
+        return 0;
     return ir_session.cars[ir_session.driverCarIdx].carClassEstLapTime;
 }
 
