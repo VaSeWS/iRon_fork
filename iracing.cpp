@@ -381,9 +381,51 @@ ConnectionStatus ir_tick()
     if( !irsdk.isConnected() )
         return ConnectionStatus::DISCONNECTED;
 
+    // Snapshot the session string into a local, owned buffer before parsing it.
+    //
+    // getSessionStr() hands out a LIVE pointer into iRacing's cross-process shared memory;
+    // the previous code parsed that pointer directly with ~1000 linear scans, during which
+    // iRacing could rewrite the blob mid-parse (RACE-01 / TOCTOU). We copy the blob once and
+    // parse the stable copy instead. This is behavior-preserving: the same parser runs over
+    // the same bytes, just out of a buffer we own.
+    //
+    // Declared in the function scope (not the inner block) so the copy's lifetime covers the
+    // entire parse below; sessionYaml points into it for the whole parse.
+    std::string sessionYamlCopy;
+    bool haveSessionSnapshot = false;
+
     if( irsdk.wasSessionStrUpdated() )
     {
-        const char* sessionYaml = irsdk.getSessionStr();
+        // getSessionStr() returns the live shared-memory pointer and, as a side effect, sets
+        // m_lastSessionCt to the session-info update counter at the moment of the call. We
+        // take that same counter as our baseline (ctBaseline) so it is guaranteed to match
+        // what getSessionStr() stored: there is no gap between the two reads where the
+        // counter could move unobserved.
+        const char* liveYaml = irsdk.getSessionStr();   // advances m_lastSessionCt to "now"
+        const int ctBaseline = irsdk.getSessionCt();    // == m_lastSessionCt set just above
+
+        if( liveYaml )
+        {
+            const irsdk_header* header = irsdk_getHeader();
+            // sessionInfoLen is the length in bytes of the session-info region; the blob is
+            // NUL-terminated within it. Fall back to strlen only if the length looks invalid.
+            int len = header ? header->sessionInfoLen : 0;
+            if( len <= 0 )
+                len = (int)strlen( liveYaml );
+            sessionYamlCopy.assign( liveYaml, (size_t)len );
+
+            // Torn-copy check: if iRacing bumped the counter while we were copying, the
+            // snapshot may be torn, so skip this re-parse. Because m_lastSessionCt still
+            // equals ctBaseline (the now-stale version), wasSessionStrUpdated() will fire
+            // again next tick and a clean copy can be taken then. We never parse a torn blob.
+            haveSessionSnapshot = ( irsdk.getSessionCt() == ctBaseline );
+        }
+    }
+
+    if( haveSessionSnapshot )
+    {
+        // Parse the stable local copy; all parseYaml* calls below read from this buffer.
+        const char* sessionYaml = sessionYamlCopy.c_str();
 #ifdef _DEBUG
         //printf("%s\n", sessionYaml);
         FILE* fp = fopen("sessionYaml.txt","ab");
@@ -543,7 +585,7 @@ ConnectionStatus ir_tick()
 
         ir_handleConfigChange();
 
-    } // if session string updated
+    } // if we took a clean session-string snapshot
 
     // Track cars in pits. Reset every time we're in the 'warmup' phase (just before starting pace laps).
     const bool resetPitAge = ir_SessionState.getInt() == irsdk_StateWarmup;
