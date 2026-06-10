@@ -438,7 +438,16 @@ bool irsdkCVar::checkIdx()
 			m_idx = irsdkClient::instance().getVarIdx(m_name);
 		}
 
-		return true;
+		// Only report the variable as usable if it actually resolved to a real
+		// index in the current session. getVarIdx() returns -1 when the name is
+		// not present in this session's telemetry (e.g. a per-car channel that
+		// this car/series does not expose). Without this guard the getters below
+		// would forward m_idx==-1 to getVarFloat/getVarBool/... where
+		// irsdk_getVarHeaderEntry(-1) returns null and trips assert(false) in
+		// Debug builds (in Release the asserts are compiled out and the getters
+		// already fall through to their default). Returning false here makes the
+		// getters short-circuit to that same default in both configurations.
+		return m_idx > -1;
 	}
 
 	return false;
