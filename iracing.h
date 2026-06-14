@@ -28,6 +28,7 @@ SOFTWARE.
 #include "irsdk/irsdk_client.h"
 #include "irsdk/yaml_parser.h"
 #include <string>
+#include <vector>
 #include "util.h"
 
 #define IR_MAX_CARS 64
@@ -92,6 +93,11 @@ struct Session
     float           rpmSLShift = 0;
     float           rpmSLLast = 0;
     float           rpmSLBlink = 0;
+
+    // Official timing sectors from SplitTimeInfo:Sectors:, as lap-distance fractions [0,1)
+    // in ascending order (the first is always 0.0). Typically 2-3 entries. Empty if the
+    // session string didn't have a SplitTimeInfo block.
+    std::vector<float> sectorStartPct;
 };
 
 extern irsdkCVar ir_SessionTime;    // double[1] Seconds since session start (s)

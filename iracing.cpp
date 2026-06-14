@@ -442,6 +442,20 @@ ConnectionStatus ir_tick()
         sprintf( path, "WeekendInfo:WeekendOptions:IsFixedSetup:" );
         parseYamlInt( sessionYaml, path, &ir_session.isFixedSetup );
 
+        // Official timing sectors (SplitTimeInfo:Sectors:), as lap-distance fractions. Each
+        // list item's first key is SectorNum, so we select the i-th item by index the same way
+        // the per-driver loop below does (Drivers:CarIdx:{%d}). Rebuild from scratch each parse.
+        // The cap is just a sanity bound; real tracks have only a handful of sectors.
+        ir_session.sectorStartPct.clear();
+        for( int i=0; i<64; ++i )
+        {
+            sprintf( path, "SplitTimeInfo:Sectors:SectorNum:{%d}SectorStartPct:", i );
+            float pct = 0.0f;
+            if( !parseYamlFloat( sessionYaml, path, &pct ) )
+                break;
+            ir_session.sectorStartPct.push_back( pct );
+        }
+
         // Current session type
         std::string sessionNameStr;
         sprintf( path, "SessionInfo:Sessions:SessionNum:{%d}SessionName:", ir_SessionNum.getInt() );

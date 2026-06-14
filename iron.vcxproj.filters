@@ -42,6 +42,7 @@
     <ClInclude Include="OverlayDebug.h" />
     <ClInclude Include="OverlayDDU.h" />
     <ClInclude Include="OverlayCover.h" />
+    <ClInclude Include="OverlayDelta.h" />
   </ItemGroup>
   <ItemGroup>
     <None Include="LICENSE" />
