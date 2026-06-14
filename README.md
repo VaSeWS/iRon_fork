@@ -20,8 +20,6 @@ The project's code base aims to be small, easy to modify, and free of external d
 - [Configuration](#configuration)
 - [Building from source](#building-from-source)
 - [Dependencies](#dependencies)
-- [Bug reports and feature requests](#bug-reports-and-feature-requests)
-- [Donations](#donations)
 
 ---
 
@@ -126,16 +124,4 @@ There are no runtime dependencies other than standard Windows components like Di
 
 Build dependencies (most notably the iRacing SDK and picojson) are kept to a minimum and are included in the repository.
 
----
 
-## Bug reports and feature requests
-
-If you encounter a problem, please file a github issue and I'll do my best to address it. Pull requests with fixes are welcome too, of course.
-
-If you'd like to see a specific feature added, feel free to file a github issue as well. If it's something small, I may actually get to it :-) No promises though, as unfortunately the time I can spend on this project is quite limited.
-
----
-
-## Donations
-
-If you like this project enough to wonder whether you can contribute financially: first of all, thank you! I'm not looking for donations, but **please consider giving to Ukraine-related charities instead**.
