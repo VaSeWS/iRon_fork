@@ -88,6 +88,7 @@
       <SDLCheck>true</SDLCheck>
       <PreprocessorDefinitions>NOMINMAX;_CRT_SECURE_NO_WARNINGS;WIN32;_DEBUG;_CONSOLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <ConformanceMode>true</ConformanceMode>
+      <AdditionalIncludeDirectories>$(ProjectDir)src;$(ProjectDir)src\core;$(ProjectDir)src\overlays;$(ProjectDir)src\iracing;$(ProjectDir)third_party;$(ProjectDir)third_party\picojson;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ClCompile>
     <Link>
       <SubSystem>Console</SubSystem>
@@ -103,6 +104,7 @@
       <SDLCheck>true</SDLCheck>
       <PreprocessorDefinitions>NOMINMAX;_CRT_SECURE_NO_WARNINGS;WIN32;NDEBUG;_CONSOLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <ConformanceMode>true</ConformanceMode>
+      <AdditionalIncludeDirectories>$(ProjectDir)src;$(ProjectDir)src\core;$(ProjectDir)src\overlays;$(ProjectDir)src\iracing;$(ProjectDir)third_party;$(ProjectDir)third_party\picojson;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ClCompile>
     <Link>
       <SubSystem>Console</SubSystem>
@@ -119,6 +121,7 @@
       <SDLCheck>true</SDLCheck>
       <PreprocessorDefinitions>PICOJSON_USE_RVALUE_REFERENCE=0;NOMINMAX;_CRT_SECURE_NO_WARNINGS;_DEBUG;_CONSOLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <ConformanceMode>true</ConformanceMode>
+      <AdditionalIncludeDirectories>$(ProjectDir)src;$(ProjectDir)src\core;$(ProjectDir)src\overlays;$(ProjectDir)src\iracing;$(ProjectDir)third_party;$(ProjectDir)third_party\picojson;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <RuntimeLibrary>MultiThreadedDebug</RuntimeLibrary>
     </ClCompile>
     <Link>
@@ -135,6 +138,7 @@
       <SDLCheck>true</SDLCheck>
       <PreprocessorDefinitions>PICOJSON_USE_RVALUE_REFERENCE=0;NOMINMAX;_CRT_SECURE_NO_WARNINGS;NDEBUG;_CONSOLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <ConformanceMode>true</ConformanceMode>
+      <AdditionalIncludeDirectories>$(ProjectDir)src;$(ProjectDir)src\core;$(ProjectDir)src\overlays;$(ProjectDir)src\iracing;$(ProjectDir)third_party;$(ProjectDir)third_party\picojson;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <RuntimeLibrary>MultiThreaded</RuntimeLibrary>
     </ClCompile>
     <Link>
@@ -147,31 +151,31 @@
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
-    <ClCompile Include="Config.cpp" />
-    <ClCompile Include="iracing.cpp" />
-    <ClCompile Include="irsdk\irsdk_client.cpp" />
-    <ClCompile Include="irsdk\irsdk_utils.cpp" />
-    <ClCompile Include="irsdk\yaml_parser.cpp" />
-    <ClCompile Include="main.cpp" />
-    <ClCompile Include="Overlay.cpp" />
-    <ClCompile Include="OverlayDebug.cpp" />
+    <ClCompile Include="src\core\Config.cpp" />
+    <ClCompile Include="src\iracing\iracing.cpp" />
+    <ClCompile Include="third_party\irsdk\irsdk_client.cpp" />
+    <ClCompile Include="third_party\irsdk\irsdk_utils.cpp" />
+    <ClCompile Include="third_party\irsdk\yaml_parser.cpp" />
+    <ClCompile Include="src\main.cpp" />
+    <ClCompile Include="src\core\Overlay.cpp" />
+    <ClCompile Include="src\overlays\OverlayDebug.cpp" />
   </ItemGroup>
   <ItemGroup>
-    <ClInclude Include="Config.h" />
-    <ClInclude Include="OverlayCover.h" />
-    <ClInclude Include="OverlayDDU.h" />
-    <ClInclude Include="OverlayDebug.h" />
-    <ClInclude Include="OverlayDelta.h" />
-    <ClInclude Include="OverlayInputs.h" />
-    <ClInclude Include="iracing.h" />
-    <ClInclude Include="irsdk\irsdk_client.h" />
-    <ClInclude Include="irsdk\irsdk_defines.h" />
-    <ClInclude Include="irsdk\yaml_parser.h" />
-    <ClInclude Include="Overlay.h" />
-    <ClInclude Include="OverlayRelative.h" />
-    <ClInclude Include="OverlayStandings.h" />
-    <ClInclude Include="picojson.h" />
-    <ClInclude Include="util.h" />
+    <ClInclude Include="src\core\Config.h" />
+    <ClInclude Include="src\overlays\OverlayCover.h" />
+    <ClInclude Include="src\overlays\OverlayDDU.h" />
+    <ClInclude Include="src\overlays\OverlayDebug.h" />
+    <ClInclude Include="src\overlays\OverlayDelta.h" />
+    <ClInclude Include="src\overlays\OverlayInputs.h" />
+    <ClInclude Include="src\iracing\iracing.h" />
+    <ClInclude Include="third_party\irsdk\irsdk_client.h" />
+    <ClInclude Include="third_party\irsdk\irsdk_defines.h" />
+    <ClInclude Include="third_party\irsdk\yaml_parser.h" />
+    <ClInclude Include="src\core\Overlay.h" />
+    <ClInclude Include="src\overlays\OverlayRelative.h" />
+    <ClInclude Include="src\overlays\OverlayStandings.h" />
+    <ClInclude Include="third_party\picojson\picojson.h" />
+    <ClInclude Include="src\core\util.h" />
   </ItemGroup>
   <ItemGroup>
     <None Include=".gitignore" />

@@ -36,7 +36,7 @@ Like the *Relative* box in iRacing, but with additional information such as lice
 
 At the top is an optional minimap. It can be set to either relative mode (own car fixed in the center) or absolute mode (start/finish line fixed in the center).
 
-![relative](https://github.com/lespalt/iRon/blob/main/relative.png?raw=true)
+![relative](docs/screenshots/relative.png)
 
 ### *DDU*
 
@@ -44,13 +44,13 @@ A dashboard that concentrates important pieces of information for which you woul
 
 The fuel calculator shows the estimated remaining laps, remaining amount of fuel, estimated fuel used per lap, estimated _additional_ fuel required to finish the race, and the fuel amount that is scheduled to be added on the next pit stop. To compute the estimated fuel consumption, the last 4 laps under green and without pit stops are taken into account, and a 5% safety margin is added. These parameters can be customized.
 
-![ddu](https://github.com/lespalt/iRon/blob/main/ddu.png?raw=true)
+![ddu](docs/screenshots/ddu.png)
 
 ### *Inputs*
 
 Shows throttle/brake/steering in a moving graph. I find it useful to practice consistent braking.
 
-![inputs](https://github.com/lespalt/iRon/blob/main/inputs.png?raw=true)
+![inputs](docs/screenshots/inputs.png)
 
 ### *Standings*
 
@@ -58,7 +58,7 @@ Shows the standings of the entire field, including safety rating, iRating, and n
 
 Like the "Relative" overlay, this will highlight buddies in green (Dale Jr. in the example below).
 
-![standings](https://github.com/lespalt/iRon/blob/main/standings.png?raw=true)
+![standings](docs/screenshots/standings.png)
 
 ### *Cover*
 

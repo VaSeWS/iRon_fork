@@ -1,48 +1,100 @@
-﻿<?xml version="1.0" encoding="utf-8"?>
+<?xml version="1.0" encoding="utf-8"?>
 <Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <ItemGroup>
-    <ClCompile Include="main.cpp" />
-    <ClCompile Include="irsdk\irsdk_client.cpp">
-      <Filter>irsdk</Filter>
-    </ClCompile>
-    <ClCompile Include="irsdk\irsdk_utils.cpp">
-      <Filter>irsdk</Filter>
-    </ClCompile>
-    <ClCompile Include="irsdk\yaml_parser.cpp">
-      <Filter>irsdk</Filter>
-    </ClCompile>
-    <ClCompile Include="iracing.cpp" />
-    <ClCompile Include="Config.cpp" />
-    <ClCompile Include="Overlay.cpp" />
-    <ClCompile Include="OverlayDebug.cpp" />
-  </ItemGroup>
-  <ItemGroup>
-    <Filter Include="irsdk">
+    <Filter Include="src">
+      <UniqueIdentifier>{dcc207c3-3ca6-4e5a-9993-5cc966795a23}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="src\core">
+      <UniqueIdentifier>{b34350ab-15ff-4d59-954d-8196634878de}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="src\overlays">
+      <UniqueIdentifier>{eee3b49e-318e-40bc-9472-efe3f8b7590b}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="src\iracing">
+      <UniqueIdentifier>{7183ecac-80fa-4b1d-a45e-4cd107b825e9}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="third_party">
+      <UniqueIdentifier>{0f456541-ec5e-4edf-a461-237745b610ea}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="third_party\picojson">
+      <UniqueIdentifier>{3765c2ec-ae01-44a5-926f-d5c3d584d155}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="third_party\irsdk">
       <UniqueIdentifier>{a67f493c-b77c-46e5-be0b-98bb42ae3d17}</UniqueIdentifier>
     </Filter>
   </ItemGroup>
   <ItemGroup>
-    <ClInclude Include="irsdk\irsdk_client.h">
-      <Filter>irsdk</Filter>
+    <ClCompile Include="src\main.cpp">
+      <Filter>src</Filter>
+    </ClCompile>
+    <ClCompile Include="src\core\Config.cpp">
+      <Filter>src\core</Filter>
+    </ClCompile>
+    <ClCompile Include="src\core\Overlay.cpp">
+      <Filter>src\core</Filter>
+    </ClCompile>
+    <ClCompile Include="src\overlays\OverlayDebug.cpp">
+      <Filter>src\overlays</Filter>
+    </ClCompile>
+    <ClCompile Include="src\iracing\iracing.cpp">
+      <Filter>src\iracing</Filter>
+    </ClCompile>
+    <ClCompile Include="third_party\irsdk\irsdk_client.cpp">
+      <Filter>third_party\irsdk</Filter>
+    </ClCompile>
+    <ClCompile Include="third_party\irsdk\irsdk_utils.cpp">
+      <Filter>third_party\irsdk</Filter>
+    </ClCompile>
+    <ClCompile Include="third_party\irsdk\yaml_parser.cpp">
+      <Filter>third_party\irsdk</Filter>
+    </ClCompile>
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="src\core\Config.h">
+      <Filter>src\core</Filter>
     </ClInclude>
-    <ClInclude Include="irsdk\irsdk_defines.h">
-      <Filter>irsdk</Filter>
+    <ClInclude Include="src\core\Overlay.h">
+      <Filter>src\core</Filter>
     </ClInclude>
-    <ClInclude Include="irsdk\yaml_parser.h">
-      <Filter>irsdk</Filter>
+    <ClInclude Include="src\core\util.h">
+      <Filter>src\core</Filter>
     </ClInclude>
-    <ClInclude Include="iracing.h" />
-    <ClInclude Include="Overlay.h" />
-    <ClInclude Include="OverlayRelative.h" />
-    <ClInclude Include="OverlayInputs.h" />
-    <ClInclude Include="Config.h" />
-    <ClInclude Include="picojson.h" />
-    <ClInclude Include="util.h" />
-    <ClInclude Include="OverlayStandings.h" />
-    <ClInclude Include="OverlayDebug.h" />
-    <ClInclude Include="OverlayDDU.h" />
-    <ClInclude Include="OverlayCover.h" />
-    <ClInclude Include="OverlayDelta.h" />
+    <ClInclude Include="src\overlays\OverlayCover.h">
+      <Filter>src\overlays</Filter>
+    </ClInclude>
+    <ClInclude Include="src\overlays\OverlayDDU.h">
+      <Filter>src\overlays</Filter>
+    </ClInclude>
+    <ClInclude Include="src\overlays\OverlayDelta.h">
+      <Filter>src\overlays</Filter>
+    </ClInclude>
+    <ClInclude Include="src\overlays\OverlayDebug.h">
+      <Filter>src\overlays</Filter>
+    </ClInclude>
+    <ClInclude Include="src\overlays\OverlayInputs.h">
+      <Filter>src\overlays</Filter>
+    </ClInclude>
+    <ClInclude Include="src\overlays\OverlayRelative.h">
+      <Filter>src\overlays</Filter>
+    </ClInclude>
+    <ClInclude Include="src\overlays\OverlayStandings.h">
+      <Filter>src\overlays</Filter>
+    </ClInclude>
+    <ClInclude Include="src\iracing\iracing.h">
+      <Filter>src\iracing</Filter>
+    </ClInclude>
+    <ClInclude Include="third_party\picojson\picojson.h">
+      <Filter>third_party\picojson</Filter>
+    </ClInclude>
+    <ClInclude Include="third_party\irsdk\irsdk_client.h">
+      <Filter>third_party\irsdk</Filter>
+    </ClInclude>
+    <ClInclude Include="third_party\irsdk\irsdk_defines.h">
+      <Filter>third_party\irsdk</Filter>
+    </ClInclude>
+    <ClInclude Include="third_party\irsdk\yaml_parser.h">
+      <Filter>third_party\irsdk</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <None Include="LICENSE" />
