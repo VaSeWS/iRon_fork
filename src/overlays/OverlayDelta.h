@@ -107,7 +107,7 @@ class OverlayDelta : public Overlay
 
             // Ghost mode: "off" (default) | "last" | "best" | "session_best". "best" and
             // "session_best" are currently the same (see captureGhostCandidate for why).
-            const std::string ghost = g_cfg.getString( m_name, "ghost", "off" );
+            const std::string ghost = g_cfg.getString( m_name, "ghost", "last" );
             m_ghostMode      = (ghost=="last") ? GHOST_LAST : (ghost=="best" || ghost=="session_best") ? GHOST_BEST : GHOST_OFF;
             m_ghostCol       = g_cfg.getFloat4( m_name, "ghost_col", float4(1,1,1,0.55f) );
             m_ghostThickness = g_cfg.getFloat( m_name, "ghost_thickness", m_thickness );
