@@ -26,6 +26,8 @@ SOFTWARE.
 
 #include <vector>
 #include <algorithm>
+#include <cmath>
+#include <cstdlib>
 #include "Overlay.h"
 #include "iracing.h"
 #include "Config.h"
@@ -96,7 +98,6 @@ class OverlayDelta : public Overlay
             // doesn't hit the config map (string hashing + float4 parsing) every frame.
             m_useBest   = (g_cfg.getString( m_name, "target", "session_best" ) == "best");
             m_thickness = g_cfg.getFloat( m_name, "line_thickness", 2.0f );
-            m_range     = std::max( 0.05f, g_cfg.getFloat( m_name, "delta_range_sec", 1.0f ) );
             m_gainFill  = g_cfg.getFloat4( m_name, "gain_fill_col", float4(0.18f,0.50f,0.16f,0.55f) );
             m_gainLine  = g_cfg.getFloat4( m_name, "gain_col",      float4(0.38f,0.91f,0.31f,0.90f) );
             m_lossFill  = g_cfg.getFloat4( m_name, "loss_fill_col", float4(0.55f,0.08f,0.10f,0.55f) );
@@ -104,6 +105,86 @@ class OverlayDelta : public Overlay
             m_zeroCol   = g_cfg.getFloat4( m_name, "zero_line_col", float4(1,1,1,0.25f) );
             m_cursorCol = g_cfg.getFloat4( m_name, "cursor_col",    float4(1,1,1,0.7f) );
             m_textCol   = g_cfg.getFloat4( m_name, "text_col",      float4(1,1,1,0.9f) );
+
+            // --- Dynamic vertical auto-scale ------------------------------------------------
+            // The trace no longer uses a fixed ±range. m_range is now an animated *current*
+            // scale that tracks the lap's delta amplitude: each frame it eases toward the
+            // smallest ladder step that still contains the running max |delta| (plus headroom).
+            // delta_range_sec keeps its key but its meaning changes from "fixed scale" to the
+            // MINIMUM scale (floor): the trace never zooms in tighter than this, so a near-zero
+            // delta doesn't get amplified into visual noise. Lower clamp unchanged (>=0.05).
+            m_minRange = std::max( 0.05f, g_cfg.getFloat( m_name, "delta_range_sec", 1.0f ) );
+
+            // Headroom keeps the peak off the very top edge of the trace (e.g. 0.08 = +8%
+            // before choosing a ladder step). rescale_speed scales the per-frame easing rate
+            // (1.0 = the tuned default; <1 calmer, >1 snappier), clamped to a sane band.
+            m_headroom     = std::max( 0.0f, g_cfg.getFloat( m_name, "range_headroom", 0.08f ) );
+            m_rescaleSpeed = std::min( 10.0f, std::max( 0.1f, g_cfg.getFloat( m_name, "rescale_speed", 1.0f ) ) );
+
+            // Parse the user's candidate scale steps: drop unparseable / non-positive entries
+            // and sort ascending. These are the discrete "rungs" the animated scale can land on.
+            std::vector<float> steps;
+            {
+                const std::vector<std::string> raw = g_cfg.getStringVec(
+                    m_name, "range_steps",
+                    std::vector<std::string>{ "0.25","0.5","1","1.5","2","3","5","10" } );
+                steps.reserve( raw.size() );
+                for( const std::string& s : raw )
+                {
+                    const float v = std::strtof( s.c_str(), nullptr );
+                    if( v > 0.0f )
+                        steps.push_back( v );
+                }
+                std::sort( steps.begin(), steps.end() );
+            }
+
+            // Build the scale ladder once per config reload (no per-frame work). The floor
+            // (m_minRange) is always the first rung; steps at or below it are dropped because
+            // zooming tighter than the floor is intentionally disallowed. The first surviving
+            // step (stepHigh) is either kept alongside the floor or merged into it, so we don't
+            // end up with two near-identical bottom rungs the scale would pointlessly hop between:
+            //   floor=1, stepHigh=1.5  -> ratio 1.5 >= 1.2 -> keep both: { 1, 1.5, ... }
+            //   floor=1, stepHigh=1.07 -> ratio ~1.07 < 1.2 -> drop 1.07: { 1, <steps > 1.07> }
+            m_ladder.clear();
+            {
+                size_t i = 0;
+                while( i < steps.size() && steps[i] <= m_minRange )   // (b) drop rungs <= floor
+                    ++i;
+                if( i >= steps.size() )
+                {
+                    // (c) nothing survives above the floor -> single-rung ladder.
+                    m_ladder.push_back( m_minRange );
+                }
+                else
+                {
+                    const float stepHigh = steps[i];   // smallest rung strictly above the floor
+                    if( stepHigh / m_minRange >= STEP_MERGE_RATIO )
+                    {
+                        // Gap big enough: floor and stepHigh are distinct rungs, append the rest.
+                        m_ladder.push_back( m_minRange );
+                        for( size_t j = i; j < steps.size(); ++j )
+                            m_ladder.push_back( steps[j] );
+                    }
+                    else
+                    {
+                        // stepHigh too close to the floor: replace it, keep only rungs strictly
+                        // above it (the floor stands in for that lowest band).
+                        m_ladder.push_back( m_minRange );
+                        for( size_t j = i; j < steps.size(); ++j )
+                            if( steps[j] > stepHigh )
+                                m_ladder.push_back( steps[j] );
+                    }
+                }
+            }
+            // Invariants relied on by onUpdate: non-empty, ascending, front() == floor.
+            if( m_ladder.empty() )
+                m_ladder.push_back( m_minRange );
+
+            // Bring the animated scale and amplitude trackers to a consistent starting state:
+            // start zoomed all the way in at the floor; the first laps' peaks will ease it out.
+            m_range          = m_minRange;
+            m_lapMaxAbs      = 0.0f;
+            m_ghostBestMaxAbs = 0.0f;
 
             // Ghost mode: "off" (default) | "last" | "best" | "session_best". "best" and
             // "session_best" are currently the same (see captureGhostCandidate for why).
@@ -150,6 +231,7 @@ class OverlayDelta : public Overlay
             // at the old bucket count (its size would no longer match m_resolution). Drop it.
             m_ghost.clear();
             m_ghostBest.clear();
+            m_ghostBestMaxAbs = 0.0f;
             m_ghostBestLapTime = -1.0f;
         }
 
@@ -171,7 +253,13 @@ class OverlayDelta : public Overlay
             // meaningful comparison.
             m_ghost.clear();
             m_ghostBest.clear();
+            m_ghostBestMaxAbs = 0.0f;
             m_ghostBestLapTime = -1.0f;
+
+            // New session -> re-arm the dynamic scale: zoom back to the floor and forget the
+            // previous session's amplitude so a stale peak can't keep the trace zoomed out.
+            m_range     = m_minRange;
+            m_lapMaxAbs = 0.0f;
         }
 
         virtual void onUpdate()
@@ -231,6 +319,12 @@ class OverlayDelta : public Overlay
 
             if( deltaOk )
             {
+                // Track this lap's running peak |delta| from the RAW frame value (before the
+                // bucket clamp/fill). Updated here, ahead of the scale computation below, so a
+                // fresh peak lifts the scale's target in the SAME frame it appears -- the fast
+                // up-easing then reacts immediately and the spike is never clipped.
+                m_lapMaxAbs = std::max( m_lapMaxAbs, std::fabs( delta ) );
+
                 int bucket = (int)( lapPct * m_resolution );
                 if( bucket >= m_resolution ) bucket = m_resolution - 1;
                 if( bucket < 0 )             bucket = 0;
@@ -271,10 +365,43 @@ class OverlayDelta : public Overlay
             const float traceH  = h - barH;
             const float center   = traceH * 0.5f;
             const float halfSpan = std::max( 1.0f, traceH * 0.5f - 2.0f );
+
+            // --- Per-frame dynamic scale animation ------------------------------------------
+            // Drive m_range toward the ladder rung that contains the current amplitude. Done
+            // every frame (independent of deltaOk) so the scale keeps easing during gaps in
+            // valid delta. The mechanism is purely per-frame (one update == one frame), matching
+            // the moving elements in OverlayInputs: no wall-clock dt and no runtime exp() -- the
+            // coefficients below are taus converted to per-frame easing constants at ~60 Hz.
+            //
+            // Amplitude to fit: this lap's peak |delta|, and -- only when a "best" ghost is
+            // shown -- that ghost's peak too, so the frozen ghost curve isn't clipped against a
+            // scale chosen from the live lap alone. headroom lifts it off the top edge.
+            {
+                const float ghostMaxAbs = (m_ghostMode == GHOST_BEST) ? m_ghostBestMaxAbs : 0.0f;
+                const float needed = std::max( m_lapMaxAbs, ghostMaxAbs ) * (1.0f + m_headroom);
+
+                // Smallest rung >= needed; if needed exceeds the top rung, clip to the top
+                // (a brief over-range on an extreme spike is acceptable, see yOf's clamp).
+                float target = m_ladder.back();
+                for( float s : m_ladder ) { if( s >= needed ) { target = s; break; } }
+
+                // Exponential per-frame approach. Up is fast (a new peak must not get clipped
+                // while the scale catches up); down is slow and calm (zoom-in happens at the
+                // start of a lap, when the driver is busy with the entry to T1 and a jumpy
+                // rescale would be distracting).
+                const float kUp   = std::min( 1.0f, 0.09f  * m_rescaleSpeed );
+                const float kDown = std::min( 1.0f, 0.027f * m_rescaleSpeed );
+                const float k = ( target > m_range ) ? kUp : kDown;
+                m_range += ( target - m_range ) * k;
+            }
+
             const float scale    = halfSpan / m_range;   // pixels per second
 
             auto xOf = [&]( int b )->float { return (float(b) + 0.5f) / float(m_resolution) * w; };
             auto yOf = [&]( float d )->float {
+                // Clamp to ±m_range. With the dynamic scale this rarely bites -- only in the
+                // brief frames where target > m_range while the up-easing is still catching up
+                // to a sharp new peak -- but it still guards the trace from drawing off-frame.
                 const float c = std::min( m_range, std::max( -m_range, d ) );
                 return center - c * scale;          // d>0 (loss) -> above center, d<0 (gain) -> below
             };
@@ -450,6 +577,10 @@ class OverlayDelta : public Overlay
             m_minBucket = -1;
             m_maxBucket = -1;
             m_lastLapPct = -1.0f;
+            // New lap -> forget the previous lap's amplitude so the scale can ease back in if
+            // the new lap is cleaner. m_range itself is left alone: it eases down on its own,
+            // calmly, rather than snapping to the floor at every lap boundary.
+            m_lapMaxAbs = 0.0f;
         }
 
         // Called right at lap rollover, BEFORE resetLap() wipes [m_minBucket, m_maxBucket].
@@ -491,6 +622,14 @@ class OverlayDelta : public Overlay
             {
                 m_ghostBestLapTime = lapTime;
                 m_ghostBest = m_delta;
+
+                // Cache the ghost's peak |delta| so onUpdate can keep the GHOST_BEST curve in
+                // frame: the dynamic scale fits both the live lap and this frozen ghost. Computed
+                // once here at capture (a full-lap snapshot is rare), not per frame.
+                float m = 0.0f;
+                for( float d : m_ghostBest )
+                    m = std::max( m, std::fabs( d ) );
+                m_ghostBestMaxAbs = m;
             }
         }
 
@@ -501,9 +640,24 @@ class OverlayDelta : public Overlay
         // Cached config (populated in onConfigChanged).
         bool   m_useBest = false;
         float  m_thickness = 2.0f;
-        float  m_range = 1.0f;
         float4 m_gainFill, m_gainLine, m_lossFill, m_lossLine;
         float4 m_zeroCol, m_cursorCol, m_textCol;
+
+        // --- Dynamic vertical auto-scale -------------------------------------------------
+        // m_range is the *current*, per-frame-animated vertical scale (±seconds shown), eased
+        // toward a discrete rung of m_ladder that fits the live (and best-ghost) amplitude.
+        // m_minRange is the floor rung from delta_range_sec; the scale never zooms tighter than
+        // it. m_ladder is built once per config reload (ascending, front()==m_minRange).
+        // m_lapMaxAbs / m_ghostBestMaxAbs are the running peak |delta| of the current lap and of
+        // the best ghost, the two amplitudes the scale is fitted to.
+        static constexpr float STEP_MERGE_RATIO = 1.2f;   // min floor->next-step ratio to keep both
+        float  m_range = 1.0f;          // animated current scale
+        float  m_minRange = 1.0f;       // floor (delta_range_sec)
+        float  m_headroom = 0.08f;      // fraction of slack above the peak before picking a rung
+        float  m_rescaleSpeed = 1.0f;   // multiplier on the per-frame easing rate
+        std::vector<float> m_ladder;    // candidate scale rungs, ascending, front()==m_minRange
+        float  m_lapMaxAbs = 0.0f;      // running max |delta| this lap
+        float  m_ghostBestMaxAbs = 0.0f;// max |delta| of m_ghostBest (GHOST_BEST scaling)
 
         // Distance-indexed delta trace for the current lap. m_delta has m_resolution buckets
         // spanning lap distance [0,1); [m_minBucket, m_maxBucket] is the contiguous range that
