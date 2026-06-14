@@ -15,6 +15,7 @@ The project's code base aims to be small, easy to modify, and free of external d
   - [*Inputs*](#inputs)
   - [*Standings*](#standings)
   - [*Cover*](#cover)
+  - [*Delta*](#delta)
 - [Installing & Running](#installing--running)
 - [Configuration](#configuration)
 - [Building from source](#building-from-source)
@@ -34,7 +35,7 @@ The latest binary release can be found [here](https://github.com/lespalt/iRon/re
 
 Like the *Relative* box in iRacing, but with additional information such as license, iRating, and laps driven since the last pit stop. You can also highlight your friends by adding their names to a buddy list.
 
-At the top is an optional minimap. It can be set to either relative mode (own car fixed in the center) or absolute mode (start/finish line fixed in the center).
+At the top is an optional minimap (`minimap_enabled`). It can be set to either relative mode (own car fixed in the center) or absolute mode (start/finish line fixed in the center) via the `minimap_is_relative` parameter: `true` for relative mode, `false` for absolute mode.
 
 ![relative](docs/screenshots/relative.png)
 
@@ -64,6 +65,31 @@ Like the "Relative" overlay, this will highlight buddies in green (Dale Jr. in t
 
 No screenshot for this one, because all it is is a blank rectangle. Can be useful to cover up distracting in-game dashboards, like the one in the next-gen NASCAR.
 
+### *Delta*
+
+A live time-delta trace: it plots, across the lap, how much time you are gaining or losing against a reference lap. Green areas mean you are up on the reference, red means you are down. An optional dashed *ghost* trace overlays a second reference lap for comparison, and a *section bar* along the bottom splits the lap into the sim's official timing sectors and colours each by time gained/lost.
+
+Some of this overlay's parameters take one of a fixed set of values rather than a number or colour. The most important ones:
+
+| Parameter | Allowed values | Meaning |
+|-----------|----------------|---------|
+| `target` | `session_best` (default), `best` | Reference lap the live delta is measured against. `session_best` = your fastest lap in the current session; `best` = the sim's stored best lap. |
+| `ghost` | `off` (default), `last`, `best`, `session_best` | Which lap to draw as the dashed ghost trace. `off` disables it; `last` = your last completed lap; `best`/`session_best` = your best lap (currently identical). |
+
+Other notable parameters (numeric/boolean):
+
+| Parameter | Type / range | Default | Meaning |
+|-----------|--------------|---------|---------|
+| `delta_range_sec` | float, min `0.05` | `1.0` | Vertical scale of the trace: ± this many seconds is shown. |
+| `trace_resolution` | int, clamped `16`–`5000` | `300` | Number of sample buckets across the lap (higher = smoother trace, more work per frame). |
+| `line_thickness` | float | `2.0` | Thickness of the delta trace line. |
+| `ghost_thickness` | float | = `line_thickness` | Thickness of the ghost trace line. |
+| `section_bar` | bool | `true` | Show the per-sector delta bar at the bottom. |
+| `section_bar_height` | float | `22.0` | Height of the section bar, in pixels. |
+| `show_section_values` | bool | `true` | Print the time gained/lost in each section on the bar. |
+
+All `*_col` parameters (e.g. `gain_col`, `loss_col`, `ghost_col`, `zero_line_col`, `section_gain_col`, …) are RGBA colours given as four numbers in the range `[0, 1]`.
+
 ---
 
 ## Installing & Running
@@ -81,6 +107,8 @@ To place and resize the overlays, press ALT-j. This will enter a mode in which y
 Overlays can be switched on and off at runtime using the hotkeys displayed during startup. All hotkeys are configurable.
 
 Certain aspects of the overlays, such as colors, font types, sizes etc. can be customized. To do that, open the file **config.json** that iRon created and experiment by editing the (hopefully mostly self-explanatory) parameters. You can do that while the app is running -- the changes will take effect immediately whenever the file is saved.
+
+Most parameters are self-explanatory: colours are RGBA values given as four numbers in the range `[0, 1]`, sizes are in pixels, and `true`/`false` parameters simply switch a feature on or off. A few parameters instead accept one of a fixed set of named values -- where that is the case, the allowed values are documented in the corresponding overlay's section above (for example, the [*Delta*](#delta) overlay's `target` and `ghost`).
 
 _Note that currently, the config file will be created only after the overlays have been "touched" for the first time, usually by dragging or resizing them._
 
