@@ -596,7 +596,7 @@ ConnectionStatus ir_tick()
             sof += car.irating;
             cnt++;
         }
-        ir_session.sof = int(sof / cnt);
+        ir_session.sof = cnt ? int(sof / cnt) : 0;
 
         ir_handleConfigChange();
 

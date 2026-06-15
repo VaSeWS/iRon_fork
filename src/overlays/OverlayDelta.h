@@ -121,6 +121,11 @@ class OverlayDelta : public Overlay
             m_headroom     = std::max( 0.0f, g_cfg.getFloat( m_name, "range_headroom", 0.08f ) );
             m_rescaleSpeed = std::min( 10.0f, std::max( 0.1f, g_cfg.getFloat( m_name, "rescale_speed", 1.0f ) ) );
 
+            // In performance_mode_30hz each overlay updates every other frame (~30Hz), so the
+            // per-frame easing constants below (kUp/kDown, tuned for ~60Hz) would otherwise reach
+            // their target ~2x slower. Cache the flag here and compensate the factors in onUpdate.
+            m_halfRate = g_cfg.getBool( "General", "performance_mode_30hz", false );
+
             // Parse the user's candidate scale steps: drop unparseable / non-positive entries
             // and sort ascending. These are the discrete "rungs" the animated scale can land on.
             std::vector<float> steps;
@@ -389,8 +394,19 @@ class OverlayDelta : public Overlay
                 // while the scale catches up); down is slow and calm (zoom-in happens at the
                 // start of a lap, when the driver is busy with the entry to T1 and a jumpy
                 // rescale would be distracting).
-                const float kUp   = std::min( 1.0f, 0.09f  * m_rescaleSpeed );
-                const float kDown = std::min( 1.0f, 0.027f * m_rescaleSpeed );
+                float kUp   = std::min( 1.0f, 0.09f  * m_rescaleSpeed );
+                float kDown = std::min( 1.0f, 0.027f * m_rescaleSpeed );
+
+                // 30Hz compensation: this overlay eases only every other frame, so to cover the
+                // same wall-clock distance per second we need each step to leave the same residual
+                // two 60Hz steps would: (1-k')^1 == (1-k)^2  ->  k' = 1 - (1-k)^2. This naturally
+                // stays <= 1 (no extra clamp needed) and degrades to ~2k for the small k here.
+                if( m_halfRate )
+                {
+                    kUp   = 1.0f - (1.0f - kUp)   * (1.0f - kUp);
+                    kDown = 1.0f - (1.0f - kDown) * (1.0f - kDown);
+                }
+
                 const float k = ( target > m_range ) ? kUp : kDown;
                 m_range += ( target - m_range ) * k;
             }
@@ -655,6 +671,9 @@ class OverlayDelta : public Overlay
         float  m_minRange = 1.0f;       // floor (delta_range_sec)
         float  m_headroom = 0.08f;      // fraction of slack above the peak before picking a rung
         float  m_rescaleSpeed = 1.0f;   // multiplier on the per-frame easing rate
+        bool   m_halfRate = false;      // true in performance_mode_30hz: this overlay updates every
+                                        // other frame, so the per-frame easing constants (tuned for
+                                        // ~60Hz) are compensated to keep the same wall-clock speed
         std::vector<float> m_ladder;    // candidate scale rungs, ascending, front()==m_minRange
         float  m_lapMaxAbs = 0.0f;      // running max |delta| this lap
         float  m_ghostBestMaxAbs = 0.0f;// max |delta| of m_ghostBest (GHOST_BEST scaling)

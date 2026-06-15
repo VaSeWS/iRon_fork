@@ -178,7 +178,8 @@ std::vector<std::string> Config::getStringVec( const std::string& component, con
     }
 
     picojson::array& arr = value.get<picojson::array>();
-    std::vector<std::string> ret( arr.size() );
+    std::vector<std::string> ret;
+    ret.reserve( arr.size() );
     for( picojson::value& entry : arr )
         ret.push_back( entry.get<std::string>() );
     return ret;
