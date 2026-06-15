@@ -78,7 +78,10 @@ Other notable parameters (numeric/boolean):
 
 | Parameter | Type / range | Default | Meaning |
 |-----------|--------------|---------|---------|
-| `delta_range_sec` | float, min `0.05` | `1.0` | Vertical scale of the trace: ± this many seconds is shown. |
+| `delta_range_sec` | float, min `0.05` | `1.0` | Minimum vertical scale (floor): ± this many seconds at most zoom. The scale is dynamic — it eases out lap by lap to fit the largest delta seen — but never zooms in tighter than this. |
+| `range_steps` | list of floats | `["0.25","0.5","1","1.5","2","3","5","10"]` | Discrete scale steps (seconds) the dynamic scale can land on. Steps at or below `delta_range_sec` are dropped; the floor is always the lowest step. |
+| `range_headroom` | float, min `0` | `0.08` | Extra slack above the peak delta before choosing a larger step (`0.08` = +8%), so the peak doesn't sit on the very top edge. |
+| `rescale_speed` | float, clamped `0.1`–`10` | `1.0` | Multiplier on how fast the scale animates (`1.0` = tuned default; lower is calmer, higher snappier). Zoom-out is fast so peaks aren't clipped; zoom-in is slower. |
 | `trace_resolution` | int, clamped `16`–`5000` | `300` | Number of sample buckets across the lap (higher = smoother trace, more work per frame). |
 | `line_thickness` | float | `2.0` | Thickness of the delta trace line. |
 | `ghost_thickness` | float | = `line_thickness` | Thickness of the ghost trace line. |
