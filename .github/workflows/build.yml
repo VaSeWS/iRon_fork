@@ -34,3 +34,16 @@ jobs:
           path: x64/${{ matrix.configuration }}/iron.exe
           retention-days: 14
           if-no-files-found: error
+
+  test:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: microsoft/setup-msbuild@v2
+
+      - name: Build tests
+        run: msbuild tests.vcxproj /p:Configuration=Release /p:Platform=x64 /m /verbosity:minimal
+
+      - name: Run tests
+        run: .\x64\Release\tests.exe
