@@ -3,7 +3,7 @@
 #include "doctest.h"
 #include "yaml_parser.h"
 
-#include <cstring>
+#include <string>
 
 // Note on path syntax (matches real usage in src/iracing/iracing.cpp):
 // every key segment in the path must be terminated with ':', and array
