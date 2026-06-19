@@ -210,6 +210,11 @@ int main()
             }
         }
 
+        // Persist any newly-inserted default values (e.g. params added in a new version),
+        // so they show up in config.json and become editable without user action.
+        if( g_cfg.isDirty() )
+            g_cfg.save();
+
         // Watch for config change signal
         if( g_cfg.hasChanged() )
         {

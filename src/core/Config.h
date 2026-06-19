@@ -41,6 +41,8 @@ class Config
         void                        watchForChanges();
         bool                        hasChanged();
 
+        bool                        isDirty() const { return m_dirty; }
+
         bool                        getBool( const std::string& component, const std::string& key, bool defaultVal );
         int                         getInt( const std::string& component, const std::string& key, int defaultVal );
         float                       getFloat( const std::string& component, const std::string& key, float defaultVal );
@@ -57,6 +59,7 @@ class Config
         picojson::value&            getOrInsertValue( const std::string& component, const std::string& key, bool* existed=nullptr );
 
         picojson::object    m_pj;
+        bool                m_dirty = false;
         std::atomic<bool>   m_hasChanged = false;
         std::thread         m_configWatchThread;
         std::string         m_filename = "config.json";
