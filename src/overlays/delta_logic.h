@@ -142,6 +142,27 @@ namespace delta
         return range + ( target - range ) * k;
     }
 
+    // Did the current best lap time strictly improve over the stored one?
+    //
+    // The Delta overlay tracks "the best lap so far" from a validity-filtered sim channel
+    // (CarIdxBestLapTime for the session-best target, LapBestLapTime for the personal-best
+    // target). Both report <= 0 when there is no valid best yet (e.g. -1 on disconnect, 0
+    // before the first lap latches), so a non-positive `curBest` is never an improvement.
+    //
+    // Returns true iff `curBest` is a valid time (> 0) AND either there was no stored best
+    // yet (`storedBest` <= 0) or `curBest` beats it by more than `eps`. The `eps` margin
+    // (lap times carry ~1 ms precision) keeps a mere re-report of the same best -- or a
+    // different lap that merely ties it -- from counting as a new best (which would, e.g.,
+    // re-trigger the new-best pulse every lap on a degenerate tie).
+    inline bool bestImproved( float curBest, float storedBest, float eps )
+    {
+        if( curBest <= 0.0f )
+            return false;
+        if( storedBest <= 0.0f )
+            return true;
+        return curBest < storedBest - eps;
+    }
+
     // Parametric crossing point where a segment running from value d0 to d1 crosses the
     // horizontal edge E. The Delta overlay uses this to clip the trace exactly at a visible-
     // scale boundary (E == +range or -range) so the line meets the fill edge and then vanishes
