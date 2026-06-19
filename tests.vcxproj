@@ -87,6 +87,8 @@
     <ClCompile Include="tests\doctest_main.cpp" />
     <ClCompile Include="tests\test_format_util.cpp" />
     <ClCompile Include="tests\test_yaml.cpp" />
+    <ClCompile Include="tests\test_yaml_edge.cpp" />
+    <ClCompile Include="tests\test_yaml_fixture.cpp" />
     <ClCompile Include="third_party\irsdk\yaml_parser.cpp" />
   </ItemGroup>
   <ItemGroup>
