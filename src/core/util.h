@@ -34,6 +34,7 @@ SOFTWARE.
 #include <dwrite.h>
 #include <unordered_map>
 #include <ctype.h>
+#include "format_util.h"
 
 #define HRCHECK( x_ ) do{ \
     HRESULT hr_ = x_; \
@@ -103,17 +104,6 @@ inline bool saveFile( const std::string& fname, const std::string& s )
 inline std::wstring toWide( const std::string& narrow )
 {
     return std::wstring(narrow.begin(),narrow.end());
-}
-
-inline std::string formatLaptime( float secs )
-{
-    char s[32];
-    const int mins = int(secs/60.0f);
-    if( mins )
-        sprintf( s, "%d:%06.3f", mins, fmodf(secs,60.0f) );
-    else
-        sprintf( s, "%.03f", secs );
-    return std::string( s );
 }
 
 class ColumnLayout
@@ -198,73 +188,6 @@ class ColumnLayout
 
         std::vector<Column>     m_columns;
 };
-
-//-----------------------------------------------------------------------------
-// MurmurHash2, by Austin Appleby
-
-// Note - This code makes a few assumptions about how your machine behaves -
-
-// 1. We can read a 4-byte value from any address without crashing
-// 2. sizeof(int) == 4
-
-// And it has a few limitations -
-
-// 1. It will not work incrementally.
-// 2. It will not produce the same results on little-endian and big-endian
-//    machines.
-
-inline unsigned int MurmurHash2 ( const void * key, int len, unsigned int seed )
-{
-    // 'm' and 'r' are mixing constants generated offline.
-    // They're not really 'magic', they just happen to work well.
-
-    const unsigned int m = 0x5bd1e995;
-    const int r = 24;
-
-    // Initialize the hash to a 'random' value
-
-    unsigned int h = seed ^ len;
-
-    // Mix 4 bytes at a time into the hash
-
-    const unsigned char * data = (const unsigned char *)key;
-
-    while(len >= 4)
-    {
-        unsigned int k = *(unsigned int *)data;
-
-        k *= m; 
-        k ^= k >> r; 
-        k *= m; 
-
-        h *= m; 
-        h ^= k;
-
-        data += 4;
-        len -= 4;
-    }
-
-    // Handle the last few bytes of the input array
-
-    switch(len)
-    {
-    case 3: h ^= data[2] << 16;
-    case 2: h ^= data[1] << 8;
-    case 1: h ^= data[0];
-        h *= m;
-    };
-
-    // Do a few final mixes of the hash to ensure the last few
-    // bytes are well-incorporated.
-
-    h ^= h >> 13;
-    h *= m;
-    h ^= h >> 15;
-
-    return h;
-} 
-// End MurmurHash2
-//-----------------------------------------------------------------------------
 
 class TextCache
 {
@@ -374,11 +297,6 @@ inline float2 computeTextExtent( const wchar_t* str, IDWriteFactory* factory, ID
     textLayout->Release();
 
     return float2( m.width, m.height );
-}
-
-inline float celsiusToFahrenheit( float c )
-{
-    return c * (9.0f / 5.0f) + 32.0f;
 }
 
 inline bool parseHotkey( const std::string& desc, UINT* mod, UINT* vk )
