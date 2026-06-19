@@ -56,7 +56,7 @@
       <PreprocessorDefinitions>NOMINMAX;_CRT_SECURE_NO_WARNINGS;_DEBUG;_CONSOLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <ConformanceMode>true</ConformanceMode>
       <LanguageStandard>stdcpp17</LanguageStandard>
-      <AdditionalIncludeDirectories>$(ProjectDir)third_party\doctest;$(ProjectDir)src\core;$(ProjectDir)third_party\irsdk;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(ProjectDir)third_party\doctest;$(ProjectDir)src\core;$(ProjectDir)src\overlays;$(ProjectDir)third_party\irsdk;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <RuntimeLibrary>MultiThreadedDebug</RuntimeLibrary>
     </ClCompile>
     <Link>
@@ -73,7 +73,7 @@
       <PreprocessorDefinitions>NOMINMAX;_CRT_SECURE_NO_WARNINGS;NDEBUG;_CONSOLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <ConformanceMode>true</ConformanceMode>
       <LanguageStandard>stdcpp17</LanguageStandard>
-      <AdditionalIncludeDirectories>$(ProjectDir)third_party\doctest;$(ProjectDir)src\core;$(ProjectDir)third_party\irsdk;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(ProjectDir)third_party\doctest;$(ProjectDir)src\core;$(ProjectDir)src\overlays;$(ProjectDir)third_party\irsdk;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <RuntimeLibrary>MultiThreaded</RuntimeLibrary>
     </ClCompile>
     <Link>
@@ -89,11 +89,13 @@
     <ClCompile Include="tests\test_yaml.cpp" />
     <ClCompile Include="tests\test_yaml_edge.cpp" />
     <ClCompile Include="tests\test_yaml_fixture.cpp" />
+    <ClCompile Include="tests\test_delta_logic.cpp" />
     <ClCompile Include="third_party\irsdk\yaml_parser.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="third_party\doctest\doctest.h" />
     <ClInclude Include="src\core\format_util.h" />
+    <ClInclude Include="src\overlays\delta_logic.h" />
     <ClInclude Include="third_party\irsdk\yaml_parser.h" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />

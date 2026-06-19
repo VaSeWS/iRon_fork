@@ -32,6 +32,7 @@ SOFTWARE.
 #include "iracing.h"
 #include "Config.h"
 #include "OverlayDebug.h"
+#include "delta_logic.h"
 
 // Delta Trace overlay (core).
 //
@@ -144,46 +145,11 @@ class OverlayDelta : public Overlay
             }
 
             // Build the scale ladder once per config reload (no per-frame work). The floor
-            // (m_minRange) is always the first rung; steps at or below it are dropped because
-            // zooming tighter than the floor is intentionally disallowed. The first surviving
-            // step (stepHigh) is either kept alongside the floor or merged into it, so we don't
-            // end up with two near-identical bottom rungs the scale would pointlessly hop between:
-            //   floor=1, stepHigh=1.5  -> ratio 1.5 >= 1.2 -> keep both: { 1, 1.5, ... }
-            //   floor=1, stepHigh=1.07 -> ratio ~1.07 < 1.2 -> drop 1.07: { 1, <steps > 1.07> }
-            m_ladder.clear();
-            {
-                size_t i = 0;
-                while( i < steps.size() && steps[i] <= m_minRange )   // (b) drop rungs <= floor
-                    ++i;
-                if( i >= steps.size() )
-                {
-                    // (c) nothing survives above the floor -> single-rung ladder.
-                    m_ladder.push_back( m_minRange );
-                }
-                else
-                {
-                    const float stepHigh = steps[i];   // smallest rung strictly above the floor
-                    if( stepHigh / m_minRange >= STEP_MERGE_RATIO )
-                    {
-                        // Gap big enough: floor and stepHigh are distinct rungs, append the rest.
-                        m_ladder.push_back( m_minRange );
-                        for( size_t j = i; j < steps.size(); ++j )
-                            m_ladder.push_back( steps[j] );
-                    }
-                    else
-                    {
-                        // stepHigh too close to the floor: replace it, keep only rungs strictly
-                        // above it (the floor stands in for that lowest band).
-                        m_ladder.push_back( m_minRange );
-                        for( size_t j = i; j < steps.size(); ++j )
-                            if( steps[j] > stepHigh )
-                                m_ladder.push_back( steps[j] );
-                    }
-                }
-            }
-            // Invariants relied on by onUpdate: non-empty, ascending, front() == floor.
-            if( m_ladder.empty() )
-                m_ladder.push_back( m_minRange );
+            // (m_minRange) is always the first rung; steps at or below it are dropped, and the
+            // smallest surviving step is merged into the floor if it is too close to it (see
+            // delta::buildLadder for the full merge rule). Result: non-empty, ascending,
+            // front() == m_minRange -- the invariants onUpdate relies on.
+            m_ladder = delta::buildLadder( steps, m_minRange );
 
             // Bring the animated scale and amplitude trackers to a consistent starting state:
             // start zoomed all the way in at the floor; the first laps' peaks will ease it out.
@@ -383,32 +349,14 @@ class OverlayDelta : public Overlay
             // scale chosen from the live lap alone. headroom lifts it off the top edge.
             {
                 const float ghostMaxAbs = (m_ghostMode == GHOST_BEST) ? m_ghostBestMaxAbs : 0.0f;
-                const float needed = std::max( m_lapMaxAbs, ghostMaxAbs ) * (1.0f + m_headroom);
 
-                // Smallest rung >= needed; if needed exceeds the top rung, clip to the top
-                // (a brief over-range on an extreme spike is acceptable, see yOf's clamp).
-                float target = m_ladder.back();
-                for( float s : m_ladder ) { if( s >= needed ) { target = s; break; } }
+                // Smallest rung that fits the amplitude (this lap's peak, plus the best-ghost
+                // peak when shown) with headroom; clips to the top rung on an extreme spike.
+                const float target = delta::pickTargetRung( m_ladder, m_lapMaxAbs, ghostMaxAbs, m_headroom );
 
-                // Exponential per-frame approach. Up is fast (a new peak must not get clipped
-                // while the scale catches up); down is slow and calm (zoom-in happens at the
-                // start of a lap, when the driver is busy with the entry to T1 and a jumpy
-                // rescale would be distracting).
-                float kUp   = std::min( 1.0f, 0.09f  * m_rescaleSpeed );
-                float kDown = std::min( 1.0f, 0.027f * m_rescaleSpeed );
-
-                // 30Hz compensation: this overlay eases only every other frame, so to cover the
-                // same wall-clock distance per second we need each step to leave the same residual
-                // two 60Hz steps would: (1-k')^1 == (1-k)^2  ->  k' = 1 - (1-k)^2. This naturally
-                // stays <= 1 (no extra clamp needed) and degrades to ~2k for the small k here.
-                if( m_halfRate )
-                {
-                    kUp   = 1.0f - (1.0f - kUp)   * (1.0f - kUp);
-                    kDown = 1.0f - (1.0f - kDown) * (1.0f - kDown);
-                }
-
-                const float k = ( target > m_range ) ? kUp : kDown;
-                m_range += ( target - m_range ) * k;
+                // Exponential per-frame approach toward that rung (fast up, slow/calm down,
+                // 30Hz-compensated when m_halfRate). See delta::easeRange.
+                m_range = delta::easeRange( m_range, target, m_rescaleSpeed, m_halfRate );
             }
 
             const float scale    = halfSpan / m_range;   // pixels per second
@@ -666,7 +614,7 @@ class OverlayDelta : public Overlay
         // it. m_ladder is built once per config reload (ascending, front()==m_minRange).
         // m_lapMaxAbs / m_ghostBestMaxAbs are the running peak |delta| of the current lap and of
         // the best ghost, the two amplitudes the scale is fitted to.
-        static constexpr float STEP_MERGE_RATIO = 1.2f;   // min floor->next-step ratio to keep both
+        // (STEP_MERGE_RATIO and the ladder/rung/ease math now live in delta::, see delta_logic.h.)
         float  m_range = 1.0f;          // animated current scale
         float  m_minRange = 1.0f;       // floor (delta_range_sec)
         float  m_headroom = 0.08f;      // fraction of slack above the peak before picking a rung
