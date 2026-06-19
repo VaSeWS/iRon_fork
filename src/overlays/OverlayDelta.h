@@ -194,10 +194,11 @@ class OverlayDelta : public Overlay
             m_ghostFill      = g_cfg.getFloat4( m_name, "ghost_fill_col", float4(1,1,1,0.12f) );
             m_ghostThickness = g_cfg.getFloat( m_name, "ghost_thickness", m_thickness );
 
-            // New-best celebration: a one-shot pulse of the center/zero line when a completed
-            // lap becomes the new target (see captureGhostCandidate / onUpdate).
+            // New-best celebration: a "double breath" pulse (two quick attack/decay cycles plus a
+            // slower final fade) of the center/zero line when a completed lap becomes the new
+            // target (see captureGhostCandidate / the phase-machine block in onUpdate).
             m_pbPulse    = g_cfg.getBool  ( m_name, "new_best_pulse",     true );
-            m_pbPulseCol = g_cfg.getFloat4( m_name, "new_best_pulse_col", float4(1.0f,0.85f,0.35f,0.55f) );
+            m_pbPulseCol = g_cfg.getFloat4( m_name, "new_best_pulse_col", float4(1.0f,0.80f,0.30f,0.85f) );
 
             // Dashed stroke style for the ghost trace. Created once here (not per frame) and
             // reused for every DrawGeometry call on the ghost path. Fields left at their D2D
@@ -245,6 +246,8 @@ class OverlayDelta : public Overlay
             m_ghostCollapse = 0.0f;
             m_ghostMerging = false;
             m_zeroHighlight = 0.0f;
+            m_pbPhase = PB_IDLE;
+            m_pbPhaseFrame = 0;
             m_prevTargetLapTime = -1.0f;
         }
 
@@ -274,6 +277,8 @@ class OverlayDelta : public Overlay
             m_ghostCollapse = 0.0f;
             m_ghostMerging = false;
             m_zeroHighlight = 0.0f;
+            m_pbPhase = PB_IDLE;
+            m_pbPhaseFrame = 0;
             m_prevTargetLapTime = -1.0f;
 
             // New session -> re-arm the dynamic scale: zoom back to the floor and forget the
@@ -418,12 +423,50 @@ class OverlayDelta : public Overlay
             }
 
             // --- Ghost collapse / new-best pulse animation -----------------------------------
-            // Ease the ghost-collapse amount toward its target, and decay the new-best pulse. Frame-driven
-            // like the scale animation above (one update == one frame, ~60 Hz). k=0.08 settles the collapse
-            // in ~1 s; the pulse decays a touch slower for a visible afterglow. captureGhostCandidate() sets
-            // the collapse target / re-arms the pulse at lap rollovers.
+            // Ease the ghost-collapse amount toward its target. Frame-driven like the scale
+            // animation above (one update == one frame, ~60 Hz). k=0.08 settles the collapse in ~1 s.
+            // captureGhostCandidate() sets the collapse target at lap rollovers.
             m_ghostCollapse += ( (m_ghostMerging ? 1.0f : 0.0f) - m_ghostCollapse ) * 0.08f;
-            m_zeroHighlight += ( 0.0f - m_zeroHighlight ) * 0.05f;
+
+            // New-best "double breath" pulse: a small per-frame phase machine drives m_zeroHighlight
+            // through two quick attack/decay cycles followed by a slower final fade back to 0, instead
+            // of a single instant pulse. All frame counts and easing rates below are pre-computed
+            // constants tuned for ~60 Hz (no wall-clock dt, no runtime exp()/pow() in the hot path).
+            // captureGhostCandidate() arms the machine (PB_IDLE -> PB_P1_ATTACK) on a genuine new best;
+            // it free-runs to completion (or gets reset to PB_IDLE on config/session changes) from there.
+            switch( m_pbPhase )
+            {
+                case PB_IDLE:
+                    // Nothing to animate; m_zeroHighlight stays wherever it was left (0).
+                    break;
+
+                case PB_P1_ATTACK:
+                    // Quick rise to the first peak: 6 frames, ease toward 1.0 at k=0.40.
+                    m_zeroHighlight += ( 1.00f - m_zeroHighlight ) * 0.40f;
+                    if( ++m_pbPhaseFrame >= 6 ) { m_pbPhase = PB_P1_DECAY; m_pbPhaseFrame = 0; }
+                    break;
+
+                case PB_P1_DECAY:
+                    // First settle: 12 frames, ease toward a mid-level 0.35 at k=0.15 (doesn't fully
+                    // die out -- this is the "inhale" before the second breath).
+                    m_zeroHighlight += ( 0.35f - m_zeroHighlight ) * 0.15f;
+                    if( ++m_pbPhaseFrame >= 12 ) { m_pbPhase = PB_P2_ATTACK; m_pbPhaseFrame = 0; }
+                    break;
+
+                case PB_P2_ATTACK:
+                    // Second quick rise, identical shape to the first: 6 frames, ease toward 1.0 at k=0.40.
+                    m_zeroHighlight += ( 1.00f - m_zeroHighlight ) * 0.40f;
+                    if( ++m_pbPhaseFrame >= 6 ) { m_pbPhase = PB_P2_DECAY; m_pbPhaseFrame = 0; }
+                    break;
+
+                case PB_P2_DECAY:
+                    // Final fade: ~33 frames, ease toward 0.0 at k=0.08 for a slow, calm afterglow.
+                    // Once the phase's frame budget is spent, snap to idle and zero the highlight
+                    // outright (the easing will have it very close to 0 by then regardless).
+                    m_zeroHighlight += ( 0.00f - m_zeroHighlight ) * 0.08f;
+                    if( ++m_pbPhaseFrame >= 33 ) { m_pbPhase = PB_IDLE; m_pbPhaseFrame = 0; m_zeroHighlight = 0.0f; }
+                    break;
+            }
 
             const float scale    = halfSpan / m_range;   // pixels per second
 
@@ -522,14 +565,14 @@ class OverlayDelta : public Overlay
 
             m_renderTarget->BeginDraw();
 
-            // Zero (reference) line across the full width. On a genuine new best, m_zeroHighlight
-            // pulses from 1 down to 0 (see captureGhostCandidate / the easing block above);
-            // component-wise lerp the line colour toward m_pbPulseCol and thicken slightly at
-            // the peak so the celebration is visible without changing the line's resting look.
+            // Zero (reference) line across the full width: the plain resting baseline, drawn UNDER
+            // the ghost and trace (the trace fills run from each curve point down to this line).
+            // The new-best gold celebration is deliberately NOT drawn here -- drawn under the trace
+            // it would be overpainted by the fills exactly where the lap accumulated delta. It is
+            // instead drawn ON TOP, after the trace, in the m_zeroHighlight block further below.
             const float hl = m_zeroHighlight;
-            const float4 zc = lerp( m_zeroCol, m_pbPulseCol, hl );
-            m_brush->SetColor( zc );
-            m_renderTarget->DrawLine( float2(0,center), float2(w,center), m_brush.Get(), 1.0f + 0.8f*hl );
+            m_brush->SetColor( m_zeroCol );
+            m_renderTarget->DrawLine( float2(0,center), float2(w,center), m_brush.Get(), 1.0f );
 
             // Ghost: a frozen full-lap delta curve from a previously completed lap (see
             // captureGhostCandidate). Drawn as a single dashed polyline across its whole
@@ -596,6 +639,23 @@ class OverlayDelta : public Overlay
                     drawClippedLine( s, e, [&](int b){ return m_delta[b]; }, loss ? m_lossLine : m_gainLine, m_thickness, nullptr );
                     s = e + 1;
                 }
+            }
+
+            // New-best gold celebration overlay. The "double breath" highlight (a wide low-alpha
+            // halo glow plus a thicker gold core line) is drawn HERE, on top of the ghost and trace,
+            // so it actually reads: drawn under the trace it would be overpainted by the fills (which
+            // run from each curve point to the centre line) exactly where delta accumulated. hl is
+            // driven by the phase machine in onUpdate; skipped while negligible (idle) so we don't add
+            // DrawLine calls every frame for no visible effect.
+            if( hl > 0.01f )
+            {
+                const float4 haloCol = float4( m_pbPulseCol.x, m_pbPulseCol.y, m_pbPulseCol.z, 0.16f*hl );
+                m_brush->SetColor( haloCol );
+                m_renderTarget->DrawLine( float2(0,center), float2(w,center), m_brush.Get(), 1.0f + 12.0f*hl );
+
+                const float4 zc = lerp( m_zeroCol, m_pbPulseCol, hl );
+                m_brush->SetColor( zc );
+                m_renderTarget->DrawLine( float2(0,center), float2(w,center), m_brush.Get(), 1.0f + 1.2f*hl );
             }
 
             // Cursor at the current track position. Drawn independently of the trace so it is
@@ -789,10 +849,15 @@ class OverlayDelta : public Overlay
                 {
                     // The ghost's lap is now the best == the target (zero vs itself): collapse it onto the
                     // centre. Replay from the full winning curve; pulse only for a genuine improvement over a
-                    // PRIOR best (not the very first lap, which has no prior).
+                    // PRIOR best (not the very first lap, which has no prior). Arming just starts the phase
+                    // machine at its first attack -- it drives m_zeroHighlight itself from there (see the
+                    // switch in onUpdate), so we don't touch m_zeroHighlight directly here.
                     m_ghostCollapse = 0.0f;
                     if( m_pbPulse && hadPriorBest )
-                        m_zeroHighlight = 1.0f;
+                    {
+                        m_pbPhase      = PB_P1_ATTACK;
+                        m_pbPhaseFrame = 0;
+                    }
                     m_ghostMerging = true;
                 }
                 else if( m_ghostMode == GHOST_LAST )
@@ -868,17 +933,26 @@ class OverlayDelta : public Overlay
         // When a completed lap makes the ghost's lap identical to the current target lap (a new
         // best), the ghost is logically zero-delta vs itself, so it eases onto the center line and
         // merges with it. m_ghostCollapse is the animated 0..1 amount (1 = fully merged); it eases
-        // toward 1 while m_ghostMerging is true (and toward 0 otherwise). m_zeroHighlight is a
-        // one-shot 0..1 pulse of the center line celebrating a genuine PB; it always decays toward
-        // 0 and is re-armed to 1 on a new best. m_prevTargetLapTime is the target lap time seen at
-        // the previous rollover, used to edge-detect a real improvement (so degenerate configs
-        // where ghost==target every lap don't pulse repeatedly). m_pbPulse/m_pbPulseCol are config.
+        // toward 1 while m_ghostMerging is true (and toward 0 otherwise). m_zeroHighlight is the
+        // center line's current 0..1 highlight intensity, driven every frame by the m_pbPhase state
+        // machine below (a "double breath" celebration: two quick attack/decay pulses followed by a
+        // slower final fade -- see onUpdate for the per-phase easing). m_prevTargetLapTime is the
+        // target lap time seen at the previous rollover, used to edge-detect a real improvement (so
+        // degenerate configs where ghost==target every lap don't pulse repeatedly). m_pbPulse/
+        // m_pbPulseCol are config.
         float  m_ghostCollapse       = 0.0f;
         bool   m_ghostMerging        = false;
         float  m_zeroHighlight       = 0.0f;
         float  m_prevTargetLapTime   = -1.0f;
         bool   m_pbPulse             = true;
-        float4 m_pbPulseCol          = float4(1.0f,0.85f,0.35f,0.55f);
+        float4 m_pbPulseCol          = float4(1.0f,0.80f,0.30f,0.85f);
+
+        // Phase machine driving the new-best "double breath" pulse: P1 attack/decay, then P2
+        // attack/decay (a slower final fade back to idle). See onUpdate for the per-phase easing
+        // and frame counts, and captureGhostCandidate for where it's armed.
+        enum PbPhase { PB_IDLE, PB_P1_ATTACK, PB_P1_DECAY, PB_P2_ATTACK, PB_P2_DECAY };
+        PbPhase m_pbPhase      = PB_IDLE;
+        int     m_pbPhaseFrame = 0;
 
         // --- Section delta bar -----------------------------------------------------------
         bool   m_sectionBar = true;
