@@ -38,7 +38,7 @@ SOFTWARE.
 namespace delta
 {
     // Minimum floor->next-step ratio to keep both as distinct rungs (see buildLadder).
-    inline constexpr float STEP_MERGE_RATIO = 1.2f;
+    static constexpr float STEP_MERGE_RATIO = 1.2f;
 
     // Build the scale ladder once per config reload (no per-frame work). The floor
     // (minRange) is always the first rung; steps at or below it are dropped because
