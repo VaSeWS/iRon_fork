@@ -65,7 +65,7 @@ No screenshot for this one, because all it is is a blank rectangle. Can be usefu
 
 ### *Delta*
 
-A live time-delta trace: it plots, across the lap, how much time you are gaining or losing against a reference lap. Green areas mean you are up on the reference, red means you are down. An optional dashed *ghost* trace overlays a second reference lap for comparison, and a *section bar* along the bottom splits the lap into the sim's official timing sectors and colours each by time gained/lost.
+A live time-delta trace: it plots, across the lap, how much time you are gaining or losing against a reference lap. Green areas mean you are up on the reference, red means you are down. An optional *ghost* trace — a dashed line with a faint neutral fill — overlays a second reference lap for comparison, and a *section bar* along the bottom splits the lap into the sim's official timing sectors and colours each by time gained/lost. When a trace runs past the visible vertical scale its line fades out, leaving only the filled area pinned to the top/bottom edge. When you set a new best lap, the ghost's lap becomes the reference itself, so the ghost smoothly collapses onto the centre line and merges with it; an optional gold pulse of the centre line marks the personal best.
 
 Some of this overlay's parameters take one of a fixed set of values rather than a number or colour. The most important ones:
 
@@ -88,8 +88,9 @@ Other notable parameters (numeric/boolean):
 | `section_bar` | bool | `true` | Show the per-sector delta bar at the bottom. |
 | `section_bar_height` | float | `22.0` | Height of the section bar, in pixels. |
 | `show_section_values` | bool | `true` | Print the time gained/lost in each section on the bar. |
+| `new_best_pulse` | bool | `true` | Briefly pulse the centre line when you set a new best lap (the ghost-collapse celebration). Set `false` to disable just the pulse; the ghost still collapses onto the centre. |
 
-All `*_col` parameters (e.g. `gain_col`, `loss_col`, `ghost_col`, `zero_line_col`, `section_gain_col`, …) are RGBA colours given as four numbers in the range `[0, 1]`.
+All `*_col` parameters (e.g. `gain_col`, `loss_col`, `ghost_col`, `ghost_fill_col`, `zero_line_col`, `new_best_pulse_col`, `section_gain_col`, …) are RGBA colours given as four numbers in the range `[0, 1]`. `ghost_fill_col` (default a faint white, `1 1 1 0.12`) is the neutral fill drawn under the ghost line; `new_best_pulse_col` (default a warm gold, `1 0.85 0.35 0.55`) is the colour the centre line pulses to on a new best.
 
 ---
 

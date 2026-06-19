@@ -69,6 +69,12 @@ struct float4
     const float* operator&() const { return &x; }
 };
 
+// Component-wise linear interpolation between two colours/vectors: t=0 -> a, t=1 -> b.
+inline float4 lerp( const float4& a, const float4& b, float t )
+{
+    return float4( a.r + (b.r-a.r)*t, a.g + (b.g-a.g)*t, a.b + (b.b-a.b)*t, a.a + (b.a-a.a)*t );
+}
+
 inline bool loadFile( const std::string& fname, std::string& output )
 {
     FILE* fp = fopen( fname.c_str(), "rb" );

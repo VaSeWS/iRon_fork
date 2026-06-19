@@ -162,7 +162,14 @@ class OverlayDelta : public Overlay
             const std::string ghost = g_cfg.getString( m_name, "ghost", "last" );
             m_ghostMode      = (ghost=="last") ? GHOST_LAST : (ghost=="best" || ghost=="session_best") ? GHOST_BEST : GHOST_OFF;
             m_ghostCol       = g_cfg.getFloat4( m_name, "ghost_col", float4(1,1,1,0.55f) );
+            m_ghostFill      = g_cfg.getFloat4( m_name, "ghost_fill_col", float4(1,1,1,0.12f) );
             m_ghostThickness = g_cfg.getFloat( m_name, "ghost_thickness", m_thickness );
+
+            // New-best celebration: a "double breath" pulse (two quick attack/decay cycles plus a
+            // slower final fade) of the center/zero line when a completed lap becomes the new
+            // target (see captureGhostCandidate / the phase-machine block in onUpdate).
+            m_pbPulse    = g_cfg.getBool  ( m_name, "new_best_pulse",     true );
+            m_pbPulseCol = g_cfg.getFloat4( m_name, "new_best_pulse_col", float4(1.0f,0.80f,0.30f,0.85f) );
 
             // Dashed stroke style for the ghost trace. Created once here (not per frame) and
             // reused for every DrawGeometry call on the ghost path. Fields left at their D2D
@@ -204,6 +211,15 @@ class OverlayDelta : public Overlay
             m_ghostBest.clear();
             m_ghostBestMaxAbs = 0.0f;
             m_ghostBestLapTime = -1.0f;
+
+            // A config reload is a hard discontinuity for the collapse/pulse animation too:
+            // forget any in-flight collapse/pulse and the edge-detection baseline.
+            m_ghostCollapse = 0.0f;
+            m_ghostMerging = false;
+            m_zeroHighlight = 0.0f;
+            m_pbPhase = PB_IDLE;
+            m_pbPhaseFrame = 0;
+            m_prevTargetLapTime = -1.0f;
         }
 
         virtual void onSessionChanged()
@@ -226,6 +242,15 @@ class OverlayDelta : public Overlay
             m_ghostBest.clear();
             m_ghostBestMaxAbs = 0.0f;
             m_ghostBestLapTime = -1.0f;
+
+            // New session -> the collapse/pulse animation and its edge-detection baseline are
+            // no longer meaningful (the ghost itself was just cleared above).
+            m_ghostCollapse = 0.0f;
+            m_ghostMerging = false;
+            m_zeroHighlight = 0.0f;
+            m_pbPhase = PB_IDLE;
+            m_pbPhaseFrame = 0;
+            m_prevTargetLapTime = -1.0f;
 
             // New session -> re-arm the dynamic scale: zoom back to the floor and forget the
             // previous session's amplitude so a stale peak can't keep the trace zoomed out.
@@ -348,7 +373,9 @@ class OverlayDelta : public Overlay
             // shown -- that ghost's peak too, so the frozen ghost curve isn't clipped against a
             // scale chosen from the live lap alone. headroom lifts it off the top edge.
             {
-                const float ghostMaxAbs = (m_ghostMode == GHOST_BEST) ? m_ghostBestMaxAbs : 0.0f;
+                // As the GHOST_BEST ghost merges onto the centre (m_ghostCollapse->1) it no longer
+                // needs vertical range, so its contribution to the scale fades with it.
+                const float ghostMaxAbs = (m_ghostMode == GHOST_BEST) ? m_ghostBestMaxAbs * (1.0f - m_ghostCollapse) : 0.0f;
 
                 // Smallest rung that fits the amplitude (this lap's peak, plus the best-ghost
                 // peak when shown) with headroom; clips to the top rung on an extreme spike.
@@ -357,6 +384,52 @@ class OverlayDelta : public Overlay
                 // Exponential per-frame approach toward that rung (fast up, slow/calm down,
                 // 30Hz-compensated when m_halfRate). See delta::easeRange.
                 m_range = delta::easeRange( m_range, target, m_rescaleSpeed, m_halfRate );
+            }
+
+            // --- Ghost collapse / new-best pulse animation -----------------------------------
+            // Ease the ghost-collapse amount toward its target. Frame-driven like the scale
+            // animation above (one update == one frame, ~60 Hz). k=0.08 settles the collapse in ~1 s.
+            // captureGhostCandidate() sets the collapse target at lap rollovers.
+            m_ghostCollapse += ( (m_ghostMerging ? 1.0f : 0.0f) - m_ghostCollapse ) * 0.08f;
+
+            // New-best "double breath" pulse: a small per-frame phase machine drives m_zeroHighlight
+            // through two quick attack/decay cycles followed by a slower final fade back to 0, instead
+            // of a single instant pulse. All frame counts and easing rates below are pre-computed
+            // constants tuned for ~60 Hz (no wall-clock dt, no runtime exp()/pow() in the hot path).
+            // captureGhostCandidate() arms the machine (PB_IDLE -> PB_P1_ATTACK) on a genuine new best;
+            // it free-runs to completion (or gets reset to PB_IDLE on config/session changes) from there.
+            switch( m_pbPhase )
+            {
+                case PB_IDLE:
+                    // Nothing to animate; m_zeroHighlight stays wherever it was left (0).
+                    break;
+
+                case PB_P1_ATTACK:
+                    // Quick rise to the first peak: 6 frames, ease toward 1.0 at k=0.40.
+                    m_zeroHighlight += ( 1.00f - m_zeroHighlight ) * 0.40f;
+                    if( ++m_pbPhaseFrame >= 6 ) { m_pbPhase = PB_P1_DECAY; m_pbPhaseFrame = 0; }
+                    break;
+
+                case PB_P1_DECAY:
+                    // First settle: 12 frames, ease toward a mid-level 0.35 at k=0.15 (doesn't fully
+                    // die out -- this is the "inhale" before the second breath).
+                    m_zeroHighlight += ( 0.35f - m_zeroHighlight ) * 0.15f;
+                    if( ++m_pbPhaseFrame >= 12 ) { m_pbPhase = PB_P2_ATTACK; m_pbPhaseFrame = 0; }
+                    break;
+
+                case PB_P2_ATTACK:
+                    // Second quick rise, identical shape to the first: 6 frames, ease toward 1.0 at k=0.40.
+                    m_zeroHighlight += ( 1.00f - m_zeroHighlight ) * 0.40f;
+                    if( ++m_pbPhaseFrame >= 6 ) { m_pbPhase = PB_P2_DECAY; m_pbPhaseFrame = 0; }
+                    break;
+
+                case PB_P2_DECAY:
+                    // Final fade: ~33 frames, ease toward 0.0 at k=0.08 for a slow, calm afterglow.
+                    // Once the phase's frame budget is spent, snap to idle and zero the highlight
+                    // outright (the easing will have it very close to 0 by then regardless).
+                    m_zeroHighlight += ( 0.00f - m_zeroHighlight ) * 0.08f;
+                    if( ++m_pbPhaseFrame >= 33 ) { m_pbPhase = PB_IDLE; m_pbPhaseFrame = 0; m_zeroHighlight = 0.0f; }
+                    break;
             }
 
             const float scale    = halfSpan / m_range;   // pixels per second
@@ -370,9 +443,98 @@ class OverlayDelta : public Overlay
                 return center - c * scale;          // d>0 (loss) -> above center, d<0 (gain) -> below
             };
 
+            // Draws a polyline over buckets [s..e] using valAt(b) for the value, but only across
+            // spans where |value| <= m_range. Where the trace leaves/enters the visible band it
+            // is clipped exactly at the ±m_range boundary, so the line meets the fill edge
+            // cleanly and then vanishes beyond it -- instead of being clamped (by yOf) into a
+            // flat line pinned along the frame edge. strokeStyle may be null (live trace) or the
+            // dashed ghost style. All in-band spans share one geometry (multiple figures),
+            // matching the one-geometry-per-line-segment cost of the old code.
+            auto drawClippedLine = [&]( int s, int e, auto&& valAt, const float4& col,
+                                        float thick, ID2D1StrokeStyle* strokeStyle )
+            {
+                if( e < s ) return;
+                const float R = m_range;
+
+                Microsoft::WRL::ComPtr<ID2D1PathGeometry1> path;
+                Microsoft::WRL::ComPtr<ID2D1GeometrySink>  sink;
+                HRCHECK( m_d2dFactory->CreatePathGeometry( &path ) );
+                HRCHECK( path->Open( &sink ) );
+
+                bool open = false;
+                auto edgeCross = [&]( int b0, int b1, float E )->float2 {
+                    const float d0 = valAt(b0), d1 = valAt(b1);
+                    const float t  = (E - d0) / (d1 - d0);   // d1 != d0 guaranteed (one is strictly outside)
+                    return float2( xOf(b0) + (xOf(b1) - xOf(b0)) * t, yOf(E) );
+                };
+
+                if( std::fabs( valAt(s) ) <= R ) {            // first point in band: start a figure
+                    sink->BeginFigure( float2(xOf(s), yOf(valAt(s))), D2D1_FIGURE_BEGIN_HOLLOW );
+                    open = true;
+                }
+                for( int b = s+1; b <= e; ++b ) {
+                    const float d0 = valAt(b-1), d1 = valAt(b);
+                    const bool in0 = std::fabs(d0) <= R, in1 = std::fabs(d1) <= R;
+                    if( in0 && in1 ) {
+                        sink->AddLine( float2(xOf(b), yOf(d1)) );
+                    } else if( in0 && !in1 ) {                // leaving band: clip to edge, close
+                        const float E = (d1 > R) ? R : -R;
+                        sink->AddLine( edgeCross(b-1, b, E) );
+                        sink->EndFigure( D2D1_FIGURE_END_OPEN );
+                        open = false;
+                    } else if( !in0 && in1 ) {                // entering band: open at crossing
+                        const float E = (d0 > R) ? R : -R;
+                        sink->BeginFigure( edgeCross(b-1, b, E), D2D1_FIGURE_BEGIN_HOLLOW );
+                        sink->AddLine( float2(xOf(b), yOf(d1)) );
+                        open = true;
+                    }
+                    // both out of band: line vanishes, nothing emitted
+                }
+                if( open )
+                    sink->EndFigure( D2D1_FIGURE_END_OPEN );
+                HRCHECK( sink->Close() );
+
+                m_brush->SetColor( col );
+                m_renderTarget->DrawGeometry( path.Get(), m_brush.Get(), thick, strokeStyle );
+            };
+
+            // Fills the signed area between a trace and the centre line. Splits [s..e] into maximal runs of
+            // one sign (each a simple polygon from the centre up/down to the curve) and fills each with
+            // fillColorFor(loss). Shared by the live trace (gain/loss colours) and the ghost (one neutral
+            // colour). yOf()'s clamp keeps a run pinned to the frame edge where the trace leaves the band.
+            auto drawSignRunFills = [&]( int s, int e, auto&& valAt, auto&& fillColorFor )
+            {
+                int rs = s;
+                while( rs <= e )
+                {
+                    const bool loss = valAt(rs) > 0.0f;
+                    int re = rs;
+                    while( re + 1 <= e && (valAt(re+1) > 0.0f) == loss )
+                        ++re;
+                    Microsoft::WRL::ComPtr<ID2D1PathGeometry1> fillPath;
+                    Microsoft::WRL::ComPtr<ID2D1GeometrySink>  fillSink;
+                    HRCHECK( m_d2dFactory->CreatePathGeometry( &fillPath ) );
+                    HRCHECK( fillPath->Open( &fillSink ) );
+                    fillSink->BeginFigure( float2(xOf(rs),center), D2D1_FIGURE_BEGIN_FILLED );
+                    for( int b=rs; b<=re; ++b )
+                        fillSink->AddLine( float2(xOf(b), yOf(valAt(b))) );
+                    fillSink->AddLine( float2(xOf(re),center) );
+                    fillSink->EndFigure( D2D1_FIGURE_END_CLOSED );
+                    HRCHECK( fillSink->Close() );
+                    m_brush->SetColor( fillColorFor(loss) );
+                    m_renderTarget->FillGeometry( fillPath.Get(), m_brush.Get() );
+                    rs = re + 1;
+                }
+            };
+
             m_renderTarget->BeginDraw();
 
-            // Zero (reference) line across the full width.
+            // Zero (reference) line across the full width: the plain resting baseline, drawn UNDER
+            // the ghost and trace (the trace fills run from each curve point down to this line).
+            // The new-best gold celebration is deliberately NOT drawn here -- drawn under the trace
+            // it would be overpainted by the fills exactly where the lap accumulated delta. It is
+            // instead drawn ON TOP, after the trace, in the m_zeroHighlight block further below.
+            const float hl = m_zeroHighlight;
             m_brush->SetColor( m_zeroCol );
             m_renderTarget->DrawLine( float2(0,center), float2(w,center), m_brush.Get(), 1.0f );
 
@@ -384,20 +546,39 @@ class OverlayDelta : public Overlay
             const std::vector<float>& ghost = (m_ghostMode==GHOST_LAST) ? m_ghost
                                              : (m_ghostMode==GHOST_BEST) ? m_ghostBest
                                              : m_ghost /*unused, GHOST_OFF*/;
-            if( m_ghostMode != GHOST_OFF && (int)ghost.size() == m_resolution )
+            // m_ghostCollapse==1 means the ghost's lap has become the target lap (a new best):
+            // it is logically zero-delta vs itself, so the whole ghost has eased onto the
+            // center line and merged with it (see captureGhostCandidate / the easing block
+            // above). Skip the ghost entirely once fully merged -- there's nothing left to draw
+            // that isn't already the (possibly pulsing) zero line.
+            if( m_ghostMode != GHOST_OFF && (int)ghost.size() == m_resolution && m_ghostCollapse < 0.99f )
             {
-                Microsoft::WRL::ComPtr<ID2D1PathGeometry1> ghostPath;
-                Microsoft::WRL::ComPtr<ID2D1GeometrySink>  ghostSink;
-                HRCHECK( m_d2dFactory->CreatePathGeometry( &ghostPath ) );
-                HRCHECK( ghostPath->Open( &ghostSink ) );
-                ghostSink->BeginFigure( float2(xOf(0), yOf(ghost[0])), D2D1_FIGURE_BEGIN_HOLLOW );
-                for( int b=1; b<m_resolution; ++b )
-                    ghostSink->AddLine( float2(xOf(b), yOf(ghost[b])) );
-                ghostSink->EndFigure( D2D1_FIGURE_END_OPEN );
-                HRCHECK( ghostSink->Close() );
+                // cm ("collapse multiplier") shrinks every ghost sample toward the center line as
+                // m_ghostCollapse goes 0->1. Applying it to ghost[b] BEFORE yOf() drives both the
+                // fill (its height -> 0) and the line (drawn below) from the SAME scaled values,
+                // keeping them perfectly synced with no separate opacity fade for the fill.
+                // Sign-run splitting below stays on the RAW ghost[b]: multiplying by cm>0 never
+                // changes its sign, so the runs are identical to the uncollapsed case.
+                const float cm = 1.0f - m_ghostCollapse;
 
-                m_brush->SetColor( m_ghostCol );
-                m_renderTarget->DrawGeometry( ghostPath.Get(), m_brush.Get(), m_ghostThickness, m_ghostStrokeStyle.Get() );
+                // Ghost fill: split [0, m_resolution-1] into maximal runs of one sign (same
+                // run-splitting the live trace uses below) and fill each run from the curve down
+                // to the zero line, exactly like the live trace's per-run fill geometry. Unlike
+                // the live trace, every run uses the SAME neutral colour (m_ghostFill) -- this is
+                // a single monochrome fill, not a gain/loss split. Drawn before the ghost line so
+                // the line stays on top of its own fill. yOf's clamp keeps the fill pinned to the
+                // top/bottom edge where the ghost leaves the visible band, even though the line
+                // itself vanishes there (see drawClippedLine below).
+                drawSignRunFills( 0, m_resolution-1, [&](int b){ return ghost[b]*cm; }, [&](bool){ return m_ghostFill; } );
+
+                // Ghost line: a single dashed polyline across its whole m_resolution range, after
+                // the ghost fill and the zero line but before the live trace so the live trace
+                // stays on top. Uses drawClippedLine so the line vanishes (rather than pinning
+                // flat to the frame edge) wherever |ghost[b]*cm| > m_range. The line's alpha is
+                // also faded by cm so it dissolves into the (possibly pulsing) zero line as it
+                // collapses, rather than leaving a brighter double line on top of it.
+                const float4 gcol = float4( m_ghostCol.r, m_ghostCol.g, m_ghostCol.b, m_ghostCol.a * cm );
+                drawClippedLine( 0, m_resolution-1, [&](int b){ return ghost[b]*cm; }, gcol, m_ghostThickness, m_ghostStrokeStyle.Get() );
             }
 
             // Trace: split [m_minBucket, m_maxBucket] into maximal runs of one sign and draw a
@@ -405,6 +586,13 @@ class OverlayDelta : public Overlay
             // each zero crossing. Same idea as the ABS-state runs in OverlayInputs.
             if( m_minBucket >= 0 && m_maxBucket >= m_minBucket )
             {
+                // Fills: one per sign run, coloured by gain/loss.
+                drawSignRunFills( m_minBucket, m_maxBucket, [&](int b){ return m_delta[b]; },
+                                  [&](bool loss){ return loss ? m_lossFill : m_gainFill; } );
+
+                // Lines: one clipped polyline per sign run, on top of the fills. Via
+                // drawClippedLine so a line vanishes (rather than pinning flat to the frame edge)
+                // wherever |m_delta[b]| > m_range.
                 int s = m_minBucket;
                 while( s <= m_maxBucket )
                 {
@@ -412,37 +600,26 @@ class OverlayDelta : public Overlay
                     int e = s;
                     while( e + 1 <= m_maxBucket && (m_delta[e+1] > 0.0f) == loss )
                         ++e;
-
-                    // Fill from the trace down to the zero line.
-                    Microsoft::WRL::ComPtr<ID2D1PathGeometry1> fillPath;
-                    Microsoft::WRL::ComPtr<ID2D1GeometrySink>  fillSink;
-                    HRCHECK( m_d2dFactory->CreatePathGeometry( &fillPath ) );
-                    HRCHECK( fillPath->Open( &fillSink ) );
-                    fillSink->BeginFigure( float2(xOf(s),center), D2D1_FIGURE_BEGIN_FILLED );
-                    for( int b=s; b<=e; ++b )
-                        fillSink->AddLine( float2(xOf(b), yOf(m_delta[b])) );
-                    fillSink->AddLine( float2(xOf(e),center) );
-                    fillSink->EndFigure( D2D1_FIGURE_END_CLOSED );
-                    HRCHECK( fillSink->Close() );
-
-                    // Line along the trace.
-                    Microsoft::WRL::ComPtr<ID2D1PathGeometry1> linePath;
-                    Microsoft::WRL::ComPtr<ID2D1GeometrySink>  lineSink;
-                    HRCHECK( m_d2dFactory->CreatePathGeometry( &linePath ) );
-                    HRCHECK( linePath->Open( &lineSink ) );
-                    lineSink->BeginFigure( float2(xOf(s), yOf(m_delta[s])), D2D1_FIGURE_BEGIN_HOLLOW );
-                    for( int b=s+1; b<=e; ++b )
-                        lineSink->AddLine( float2(xOf(b), yOf(m_delta[b])) );
-                    lineSink->EndFigure( D2D1_FIGURE_END_OPEN );
-                    HRCHECK( lineSink->Close() );
-
-                    m_brush->SetColor( loss ? m_lossFill : m_gainFill );
-                    m_renderTarget->FillGeometry( fillPath.Get(), m_brush.Get() );
-                    m_brush->SetColor( loss ? m_lossLine : m_gainLine );
-                    m_renderTarget->DrawGeometry( linePath.Get(), m_brush.Get(), m_thickness );
-
+                    drawClippedLine( s, e, [&](int b){ return m_delta[b]; }, loss ? m_lossLine : m_gainLine, m_thickness, nullptr );
                     s = e + 1;
                 }
+            }
+
+            // New-best gold celebration overlay. The "double breath" highlight (a wide low-alpha
+            // halo glow plus a thicker gold core line) is drawn HERE, on top of the ghost and trace,
+            // so it actually reads: drawn under the trace it would be overpainted by the fills (which
+            // run from each curve point to the centre line) exactly where delta accumulated. hl is
+            // driven by the phase machine in onUpdate; skipped while negligible (idle) so we don't add
+            // DrawLine calls every frame for no visible effect.
+            if( hl > 0.01f )
+            {
+                const float4 haloCol = float4( m_pbPulseCol.x, m_pbPulseCol.y, m_pbPulseCol.z, 0.16f*hl );
+                m_brush->SetColor( haloCol );
+                m_renderTarget->DrawLine( float2(0,center), float2(w,center), m_brush.Get(), 1.0f + 12.0f*hl );
+
+                const float4 zc = lerp( m_zeroCol, m_pbPulseCol, hl );
+                m_brush->SetColor( zc );
+                m_renderTarget->DrawLine( float2(0,center), float2(w,center), m_brush.Get(), 1.0f + 1.2f*hl );
             }
 
             // Cursor at the current track position. Drawn independently of the trace so it is
@@ -574,26 +751,90 @@ class OverlayDelta : public Overlay
 
             const float lapTime = ir_LapLastLapTime.getFloat();
 
+            // Update the ghost snapshot for each mode -- both modes fall through to the shared
+            // collapse/pulse detection below (neither early-returns), since either can become
+            // the target lap.
             if( m_ghostMode == GHOST_LAST )
             {
-                m_ghost = m_delta;   // full m_resolution-sized snapshot
-                return;
+                m_ghost = m_delta;          // full m_resolution-sized snapshot
+            }
+            else // GHOST_BEST ("best" / "session_best", see onConfigChanged comment)
+            {
+                // Keep the snapshot of the completed lap with the smallest lap time seen so far
+                // this run.
+                if( lapTime > 0.0f && (m_ghostBestLapTime <= 0.0f || lapTime < m_ghostBestLapTime) )
+                {
+                    m_ghostBestLapTime = lapTime;
+                    m_ghostBest = m_delta;
+
+                    // Cache the ghost's peak |delta| so onUpdate can keep the GHOST_BEST curve in
+                    // frame: the dynamic scale fits both the live lap and this frozen ghost.
+                    // Computed once here at capture (a full-lap snapshot is rare), not per frame.
+                    float m = 0.0f;
+                    for( float d : m_ghostBest )
+                        m = std::max( m, std::fabs( d ) );
+                    m_ghostBestMaxAbs = m;
+                }
             }
 
-            // GHOST_BEST ("best" / "session_best", see onConfigChanged comment): keep the
-            // snapshot of the completed lap with the smallest lap time seen so far this run.
-            if( lapTime > 0.0f && (m_ghostBestLapTime <= 0.0f || lapTime < m_ghostBestLapTime) )
+            // --- Did the ghost just become the best? (collapse + optional pulse) --------------------
+            // Definition: the ghost's lap time dropped strictly below the target's. Detected as -- this
+            // just-completed lap (which the ghost shows: always in LAST mode, or as the freshly-updated
+            // m_ghostBest in BEST mode) IS the current best AND strictly beat the best known BEFORE this lap.
+            //   * Strict '<' (not '=='): a mere time-tie with a DIFFERENT lap must NOT collapse the ghost.
+            //   * isCurrentBest (lap <= the live target): if the real best is a lap the overlay never
+            //     captured (set before it was enabled, or any external best), the ghost stays shown normally
+            //     until we actually beat it -- it is only "<= curTarget" once this lap really is the fastest.
+            //   * Compared against m_prevTargetLapTime (the baseline as of the previous lap), because the
+            //     live target may already have absorbed this lap, which would make a '< curTarget' test miss.
             {
-                m_ghostBestLapTime = lapTime;
-                m_ghostBest = m_delta;
+                float curTarget = m_useBest ? ir_LapBestLapTime.getFloat() : m_sessionBestLapTime;
+                // Skew guard: on this exact rollover frame the sim's best (ir_LapBestLapTime) or our
+                // session-best tracker may not have folded THIS just-completed lap in yet -- and
+                // ir_LapBestLapTime reads 0 before the very first lap latches. If this lap is at
+                // least as fast as the tracked best, it IS the effective current best, so fold it in.
+                // Without this a genuine first/best lap would have isCurrentBest==false and never
+                // collapse (a permanent miss for GHOST_BEST, whose ghost then stays full-size while
+                // actually being the target).
+                if( lapTime > 0.0f && (curTarget <= 0.0f || lapTime < curTarget) )
+                    curTarget = lapTime;
+                const float EPS = 0.001f;   // 1 ms: lap times carry ms precision
+                const bool isCurrentBest = lapTime > 0.0f && curTarget > 0.0f && lapTime <= curTarget + EPS;
+                const bool becameBest    = isCurrentBest
+                                         && ( m_prevTargetLapTime <= 0.0f || lapTime < m_prevTargetLapTime - EPS );
+                const bool hadPriorBest  = m_prevTargetLapTime > 0.0f;
 
-                // Cache the ghost's peak |delta| so onUpdate can keep the GHOST_BEST curve in
-                // frame: the dynamic scale fits both the live lap and this frozen ghost. Computed
-                // once here at capture (a full-lap snapshot is rare), not per frame.
-                float m = 0.0f;
-                for( float d : m_ghostBest )
-                    m = std::max( m, std::fabs( d ) );
-                m_ghostBestMaxAbs = m;
+                // Advance the baseline to the best known now (this lap and/or any external best); monotonic.
+                if( curTarget > 0.0f )
+                    m_prevTargetLapTime = (m_prevTargetLapTime <= 0.0f) ? curTarget
+                                                                        : std::min( m_prevTargetLapTime, curTarget );
+
+                if( becameBest )
+                {
+                    // The ghost's lap is now the best == the target (zero vs itself): collapse it onto the
+                    // centre. Replay from the full winning curve; pulse only for a genuine improvement over a
+                    // PRIOR best (not the very first lap, which has no prior). Arming just starts the phase
+                    // machine at its first attack -- it drives m_zeroHighlight itself from there (see the
+                    // switch in onUpdate), so we don't touch m_zeroHighlight directly here.
+                    m_ghostCollapse = 0.0f;
+                    if( m_pbPulse && hadPriorBest )
+                    {
+                        m_pbPhase      = PB_P1_ATTACK;
+                        m_pbPhaseFrame = 0;
+                    }
+                    m_ghostMerging = true;
+                }
+                else if( m_ghostMode == GHOST_LAST )
+                {
+                    // LAST mode: the ghost is THIS lap, and it is not the best -> show it normally.
+                    // Snap (not ease) collapse to 0: this is a different lap than the one that may
+                    // have just collapsed, so it appears immediately at full shape rather than
+                    // easing up out of the centre line (which would imply a false continuity).
+                    m_ghostCollapse = 0.0f;
+                    m_ghostMerging  = false;
+                }
+                // BEST mode + not a new best: m_ghostBest is unchanged, so whether it is the target is
+                // unchanged too -- leave m_ghostMerging as-is (stays merged if it already was).
             }
         }
 
@@ -647,12 +888,38 @@ class OverlayDelta : public Overlay
         enum GhostMode { GHOST_OFF, GHOST_LAST, GHOST_BEST };
         GhostMode m_ghostMode = GHOST_OFF;
         float4    m_ghostCol = float4(1,1,1,0.55f);
+        float4    m_ghostFill = float4(1,1,1,0.12f);   // single neutral fill colour for the whole ghost
         float     m_ghostThickness = 1.5f;
         Microsoft::WRL::ComPtr<ID2D1StrokeStyle> m_ghostStrokeStyle;
 
         std::vector<float> m_ghost;        // GHOST_LAST: most recently completed full lap
         std::vector<float> m_ghostBest;    // GHOST_BEST: completed lap with smallest lap time so far
         float m_ghostBestLapTime = -1.0f;  // lap time associated with m_ghostBest, -1 = none yet
+
+        // --- "Ghost became the target" collapse + new-best pulse -----------------------------
+        // When a completed lap makes the ghost's lap identical to the current target lap (a new
+        // best), the ghost is logically zero-delta vs itself, so it eases onto the center line and
+        // merges with it. m_ghostCollapse is the animated 0..1 amount (1 = fully merged); it eases
+        // toward 1 while m_ghostMerging is true (and toward 0 otherwise). m_zeroHighlight is the
+        // center line's current 0..1 highlight intensity, driven every frame by the m_pbPhase state
+        // machine below (a "double breath" celebration: two quick attack/decay pulses followed by a
+        // slower final fade -- see onUpdate for the per-phase easing). m_prevTargetLapTime is the
+        // target lap time seen at the previous rollover, used to edge-detect a real improvement (so
+        // degenerate configs where ghost==target every lap don't pulse repeatedly). m_pbPulse/
+        // m_pbPulseCol are config.
+        float  m_ghostCollapse       = 0.0f;
+        bool   m_ghostMerging        = false;
+        float  m_zeroHighlight       = 0.0f;
+        float  m_prevTargetLapTime   = -1.0f;
+        bool   m_pbPulse             = true;
+        float4 m_pbPulseCol          = float4(1.0f,0.80f,0.30f,0.85f);
+
+        // Phase machine driving the new-best "double breath" pulse: P1 attack/decay, then P2
+        // attack/decay (a slower final fade back to idle). See onUpdate for the per-phase easing
+        // and frame counts, and captureGhostCandidate for where it's armed.
+        enum PbPhase { PB_IDLE, PB_P1_ATTACK, PB_P1_DECAY, PB_P2_ATTACK, PB_P2_DECAY };
+        PbPhase m_pbPhase      = PB_IDLE;
+        int     m_pbPhaseFrame = 0;
 
         // --- Section delta bar -----------------------------------------------------------
         bool   m_sectionBar = true;
