@@ -25,6 +25,7 @@ SOFTWARE.
 
 #pragma once
 
+#include <algorithm>
 #include "Overlay.h"
 #include "Config.h"
 #include "OverlayDebug.h"
@@ -106,7 +107,7 @@ class OverlayInputs : public Overlay
                     m_head = 0;                            // resize/empty-guard shrank the buffers
                 m_throttleVtx[m_head].y = ir_Throttle.getFloat();
                 m_brakeVtx[m_head].y    = ir_Brake.getFloat();
-                m_steerVtx[m_head].y    = std::min( 1.0f, std::max( 0.0f, (ir_SteeringWheelAngle.getFloat() / ir_SteeringWheelAngleMax.getFloat()) * -0.5f + 0.5f) );
+                m_steerVtx[m_head].y    = std::clamp( (ir_SteeringWheelAngle.getFloat() / ir_SteeringWheelAngleMax.getFloat()) * -0.5f + 0.5f, 0.0f, 1.0f );
                 // Record the brake state for THIS sample into the same slot, before advancing
                 // the head. ir_BrakeABSactive is a direct engine flag ("true if abs is currently
                 // reducing brake force pressure"), so no heuristic is needed.

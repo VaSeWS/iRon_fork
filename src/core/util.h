@@ -29,6 +29,8 @@ SOFTWARE.
 #include <stdio.h>
 #include <string>
 #include <vector>
+#include <fstream>
+#include <iterator>
 #include <windows.h>
 #include <d2d1_3.h>
 #include <dwrite.h>
@@ -77,34 +79,28 @@ inline float4 lerp( const float4& a, const float4& b, float t )
 
 inline bool loadFile( const std::string& fname, std::string& output )
 {
-    FILE* fp = fopen( fname.c_str(), "rb" );
-    if( !fp )
+    // RAII stream: the handle is always closed when 'f' leaves scope, even on an early
+    // return or exception. Reading through istreambuf_iterator sidesteps the old ftell()
+    // size dance entirely -- the previous code did new char[ftell(fp)] and ftell can return
+    // -1 (e.g. on a pipe / error), which became new char[(size_t)-1], a ~SIZE_MAX request.
+    std::ifstream f( fname, std::ios::binary );
+    if( !f )
         return false;
 
-    fseek( fp, 0, SEEK_END );
-    const long sz = ftell( fp );
-    fseek( fp, 0, SEEK_SET );
-
-    char* buf = new char[sz];
-
-    fread( buf, 1, sz, fp );
-    fclose( fp );
-    output = std::string( buf, sz );
-
-    delete[] buf;
-    return true;
+    output.assign( std::istreambuf_iterator<char>(f), std::istreambuf_iterator<char>() );
+    return !f.bad();   // bad() == an actual read error; eof at end of file is expected/fine
 }
 
 inline bool saveFile( const std::string& fname, const std::string& s )
 {
-    FILE* fp = fopen( fname.c_str(), "wb" );
-    if( !fp )
+    // RAII: the stream flushes and closes on scope exit. write() takes the byte count so
+    // embedded NULs are preserved (same as the old fwrite( data, 1, length )).
+    std::ofstream f( fname, std::ios::binary );
+    if( !f )
         return false;
 
-    fwrite( s.data(), 1, s.length(), fp );
-
-    fclose( fp );
-    return true;
+    f.write( s.data(), (std::streamsize)s.length() );
+    return f.good();
 }
 
 inline std::wstring toWide( const std::string& narrow )

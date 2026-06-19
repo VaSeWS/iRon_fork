@@ -25,6 +25,9 @@ SOFTWARE.
 
 #include "iracing.h"
 #include "Config.h"
+#ifdef _DEBUG
+#include <fstream>
+#endif
 
 irsdkCVar ir_SessionTime("SessionTime");    // double[1] Seconds since session start (s)
 irsdkCVar ir_SessionTick("SessionTick");    // int[1] Current update number ()
@@ -319,7 +322,13 @@ irsdkCVar ir_LFSHshockVel_ST("LFSHshockVel_ST");    // float[6] LFSH shock veloc
 
 Session ir_session;
 
-static bool parseYamlInt(const char *yamlStr, const char *path, int *dest)
+// parseYaml* return false when the key is absent and leave *dest untouched. Most call sites
+// below are best-effort fills that deliberately keep the destination's existing/default value
+// when a key is missing -- those are marked `(void)` to document the intentional discard.
+// [[nodiscard]] makes any *new* call site opt in explicitly, so a forgotten error check (where
+// the default is not pre-seeded) is caught at compile time instead of reading an uninitialized
+// value. Sites that already test the result (if/while) need no cast.
+[[nodiscard]] static bool parseYamlInt(const char *yamlStr, const char *path, int *dest)
 {
     int count = 0;
     const char *s = nullptr;
@@ -333,7 +342,7 @@ static bool parseYamlInt(const char *yamlStr, const char *path, int *dest)
     return false;
 }
 
-static bool parseYamlFloat(const char *yamlStr, const char *path, float *dest)
+[[nodiscard]] static bool parseYamlFloat(const char *yamlStr, const char *path, float *dest)
 {
     int count = 0;
     const char *s = nullptr;
@@ -347,7 +356,7 @@ static bool parseYamlFloat(const char *yamlStr, const char *path, float *dest)
     return false;
 }
 
-static bool parseYamlStr(const char *yamlStr, const char *path, std::string& dest)
+[[nodiscard]] static bool parseYamlStr(const char *yamlStr, const char *path, std::string& dest)
 {
     int count = 0;
     const char *s = nullptr;
@@ -429,19 +438,22 @@ ConnectionStatus ir_tick()
         const char* sessionYaml = sessionYamlCopy.c_str();
 #ifdef _DEBUG
         //printf("%s\n", sessionYaml);
-        FILE* fp = fopen("sessionYaml.txt","ab");
-        fprintf(fp,"\n\n==== NEW SESSION STRING ======================================\n");
-        fprintf(fp,"%s",sessionYaml);
-        fclose(fp);
+        // RAII append stream: closes on scope exit, and the stream-state check replaces the
+        // old unchecked fopen() whose NULL return would have crashed the following fprintf.
+        if( std::ofstream dump( "sessionYaml.txt", std::ios::binary | std::ios::app ); dump )
+        {
+            dump << "\n\n==== NEW SESSION STRING ======================================\n"
+                 << sessionYaml;
+        }
 #endif
         char path[256];
 
         // Weekend info
         sprintf( path, "WeekendInfo:SubSessionID:" );
-        parseYamlInt( sessionYaml, path, &ir_session.subsessionId );
+        (void)parseYamlInt( sessionYaml, path, &ir_session.subsessionId );
 
         sprintf( path, "WeekendInfo:WeekendOptions:IsFixedSetup:" );
-        parseYamlInt( sessionYaml, path, &ir_session.isFixedSetup );
+        (void)parseYamlInt( sessionYaml, path, &ir_session.isFixedSetup );
 
         // Official timing sectors (SplitTimeInfo:Sectors:), as lap-distance fractions. Each
         // list item's first key is SectorNum, so we select the i-th item by index the same way
@@ -460,7 +472,7 @@ ConnectionStatus ir_tick()
         // Current session type
         std::string sessionNameStr;
         sprintf( path, "SessionInfo:Sessions:SessionNum:{%d}SessionName:", ir_SessionNum.getInt() );
-        parseYamlStr( sessionYaml, path, sessionNameStr );
+        (void)parseYamlStr( sessionYaml, path, sessionNameStr );
         if( sessionNameStr == "PRACTICE" )
             ir_session.sessionType = SessionType::PRACTICE;
         if( sessionNameStr == "QUALIFY" )
@@ -469,14 +481,14 @@ ConnectionStatus ir_tick()
             ir_session.sessionType = SessionType::RACE;
 
         // Driver/car info
-        parseYamlInt( sessionYaml, "DriverInfo:DriverCarIdx:", &ir_session.driverCarIdx );
-        parseYamlFloat( sessionYaml, "DriverInfo:DriverCarFuelMaxLtr:", &ir_session.fuelMaxLtr );
-        parseYamlFloat( sessionYaml, "DriverInfo:DriverCarIdleRPM:", &ir_session.rpmIdle );
-        parseYamlFloat( sessionYaml, "DriverInfo:DriverCarRedLine:", &ir_session.rpmRedline );
-        parseYamlFloat( sessionYaml, "DriverInfo:DriverCarSLFirstRPM:", &ir_session.rpmSLFirst );
-        parseYamlFloat( sessionYaml, "DriverInfo:DriverCarSLShiftRPM:", &ir_session.rpmSLShift );
-        parseYamlFloat( sessionYaml, "DriverInfo:DriverCarSLLastRPM:", &ir_session.rpmSLLast );
-        parseYamlFloat( sessionYaml, "DriverInfo:DriverCarSLBlinkRPM:", &ir_session.rpmSLBlink );
+        (void)parseYamlInt( sessionYaml, "DriverInfo:DriverCarIdx:", &ir_session.driverCarIdx );
+        (void)parseYamlFloat( sessionYaml, "DriverInfo:DriverCarFuelMaxLtr:", &ir_session.fuelMaxLtr );
+        (void)parseYamlFloat( sessionYaml, "DriverInfo:DriverCarIdleRPM:", &ir_session.rpmIdle );
+        (void)parseYamlFloat( sessionYaml, "DriverInfo:DriverCarRedLine:", &ir_session.rpmRedline );
+        (void)parseYamlFloat( sessionYaml, "DriverInfo:DriverCarSLFirstRPM:", &ir_session.rpmSLFirst );
+        (void)parseYamlFloat( sessionYaml, "DriverInfo:DriverCarSLShiftRPM:", &ir_session.rpmSLShift );
+        (void)parseYamlFloat( sessionYaml, "DriverInfo:DriverCarSLLastRPM:", &ir_session.rpmSLLast );
+        (void)parseYamlFloat( sessionYaml, "DriverInfo:DriverCarSLBlinkRPM:", &ir_session.rpmSLBlink );
 
         // Per-Driver info
         for( int carIdx=0; carIdx<IR_MAX_CARS; ++carIdx )
@@ -497,19 +509,19 @@ ConnectionStatus ir_tick()
                 c = (c=='\n'||c=='\r') ? ' ' : c;
 
             sprintf( path, "DriverInfo:Drivers:CarIdx:{%d}CarNumber:", carIdx );
-            parseYamlStr( sessionYaml, path, car.carNumberStr );
+            (void)parseYamlStr( sessionYaml, path, car.carNumberStr );
 
             sprintf( path, "DriverInfo:Drivers:CarIdx:{%d}CarNumberRaw:", carIdx );
-            parseYamlInt( sessionYaml, path, &car.carNumber );
+            (void)parseYamlInt( sessionYaml, path, &car.carNumber );
 
             sprintf( path, "DriverInfo:Drivers:CarIdx:{%d}LicString:", carIdx );
-            parseYamlStr( sessionYaml, path, car.licenseStr );
+            (void)parseYamlStr( sessionYaml, path, car.licenseStr );
             car.licenseChar = car.licenseStr.empty() ? 'R' : car.licenseStr[0];
             const std::string SRstr = car.licenseStr.empty() ? "0" : std::string( car.licenseStr.begin()+1, car.licenseStr.end() );
             car.licenseSR = (float)atof( SRstr.c_str() );
 
             sprintf( path, "DriverInfo:Drivers:CarIdx:{%d}LicColor:", carIdx );
-            parseYamlStr( sessionYaml, path, car.licenseColStr );
+            (void)parseYamlStr( sessionYaml, path, car.licenseColStr );
             unsigned licColHex = 0;
             sscanf( car.licenseColStr.c_str(), "0x%x", &licColHex );
             car.licenseCol.r = float((licColHex >> 16) & 0xff) / 255.f;
@@ -518,19 +530,19 @@ ConnectionStatus ir_tick()
             car.licenseCol.a = 1;
 
             sprintf( path, "DriverInfo:Drivers:CarIdx:{%d}IRating:", carIdx );
-            parseYamlInt( sessionYaml, path, &car.irating );
+            (void)parseYamlInt( sessionYaml, path, &car.irating );
 
             sprintf( path, "DriverInfo:Drivers:CarIdx:{%d}CarIsPaceCar:", carIdx );
-            parseYamlInt( sessionYaml, path, &car.isPaceCar );
+            (void)parseYamlInt( sessionYaml, path, &car.isPaceCar );
 
             sprintf( path, "DriverInfo:Drivers:CarIdx:{%d}IsSpectator:", carIdx );
-            parseYamlInt( sessionYaml, path, &car.isSpectator );
+            (void)parseYamlInt( sessionYaml, path, &car.isSpectator );
 
             sprintf( path, "DriverInfo:Drivers:CarIdx:{%d}CurDriverIncidentCount:", carIdx );
-            parseYamlInt( sessionYaml, path, &car.incidentCount );
+            (void)parseYamlInt( sessionYaml, path, &car.incidentCount );
 
             sprintf( path, "DriverInfo:Drivers:CarIdx:{%d}CarClassEstLapTime:", carIdx );
-            parseYamlFloat( sessionYaml, path, &car.carClassEstLapTime );
+            (void)parseYamlFloat( sessionYaml, path, &car.carClassEstLapTime );
 
             car.practicePosition = 0;
             car.qualPosition = 0;
@@ -546,7 +558,7 @@ ConnectionStatus ir_tick()
                 ir_session.cars[carIdx].qualPosition = pos + 1;
 
                 sprintf( path, "QualifyResultsInfo:Results:Position:{%d}FastestTime:", pos );
-                parseYamlFloat( sessionYaml, path, &ir_session.cars[carIdx].qualTime );
+                (void)parseYamlFloat( sessionYaml, path, &ir_session.cars[carIdx].qualTime );
             }
         }
 
@@ -560,11 +572,12 @@ ConnectionStatus ir_tick()
 
             std::string str;
             sprintf( path, "SessionInfo:Sessions:SessionNum:{%d}SessionTime:", session );
-            parseYamlStr( sessionYaml, path, str );
+            (void)parseYamlStr( sessionYaml, path, str );
             ir_session.isUnlimitedTime = int( str=="unlimited" );
 
             sprintf( path, "SessionInfo:Sessions:SessionNum:{%d}SessionLaps:", session );
-            parseYamlStr( sessionYaml, path, str );
+            str.clear();   // don't let a missing SessionLaps key inherit the SessionTime value above
+            (void)parseYamlStr( sessionYaml, path, str );
             ir_session.isUnlimitedLaps = int( str=="unlimited" );
 
             for( int pos=1; pos<IR_MAX_CARS+1; ++pos )
