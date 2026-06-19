@@ -17,6 +17,7 @@
 using delta::buildLadder;
 using delta::pickTargetRung;
 using delta::easeRange;
+using delta::bestImproved;
 using delta::edgeCrossT;
 using delta::signRuns;
 using delta::STEP_MERGE_RATIO;
@@ -422,4 +423,40 @@ TEST_CASE("signRuns: a positive scale of the accessor does not change the runs")
     const auto raw    = signRuns( 0, (int)v.size()-1, [&]( int i ){ return v[i]; } );
     const auto scaled = signRuns( 0, (int)v.size()-1, [&]( int i ){ return v[i] * 0.25f; } );
     CHECK( raw == scaled );
+}
+
+// ----------------------------------------------------------------------------------
+// bestImproved
+// ----------------------------------------------------------------------------------
+
+TEST_CASE("bestImproved: no stored best yet -> any valid current best is an improvement")
+{
+    CHECK(  bestImproved( 90.0f,  0.0f, 0.001f ) );   // stored == 0 (none yet)
+    CHECK(  bestImproved( 90.0f, -1.0f, 0.001f ) );   // stored == -1 (disconnected sentinel)
+}
+
+TEST_CASE("bestImproved: a non-positive current best is never an improvement")
+{
+    // curBest <= 0 means "no valid best this frame" (e.g. -1 on disconnect, 0 before latch).
+    CHECK_FALSE( bestImproved(  0.0f, 90.0f, 0.001f ) );
+    CHECK_FALSE( bestImproved( -1.0f, 90.0f, 0.001f ) );
+    CHECK_FALSE( bestImproved( -1.0f,  0.0f, 0.001f ) );   // both invalid
+}
+
+TEST_CASE("bestImproved: strict improvement beyond eps counts")
+{
+    CHECK( bestImproved( 89.900f, 90.000f, 0.001f ) );   // 0.1 s faster
+    CHECK( bestImproved( 89.998f, 90.000f, 0.001f ) );   // 2 ms faster, just past 1 ms eps
+}
+
+TEST_CASE("bestImproved: a tie (or within eps) is not an improvement")
+{
+    CHECK_FALSE( bestImproved( 90.0000f, 90.0000f, 0.001f ) );   // exact tie
+    CHECK_FALSE( bestImproved( 89.9995f, 90.0000f, 0.001f ) );   // 0.5 ms faster, within eps
+    // The guard exists so a degenerate tie does not re-fire the new-best collapse/pulse.
+}
+
+TEST_CASE("bestImproved: a slower current best is not an improvement")
+{
+    CHECK_FALSE( bestImproved( 90.5f, 90.0f, 0.001f ) );
 }

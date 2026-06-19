@@ -203,7 +203,6 @@ class OverlayDelta : public Overlay
             m_delta.assign( m_resolution, 0.0f );
             resetLap();
             m_sessionBestLapTime = 0.0f;
-            m_lastLapCompleted = -1;
 
             // The resolution may have changed, which would invalidate any ghost snapshot taken
             // at the old bucket count (its size would no longer match m_resolution). Drop it.
@@ -225,10 +224,10 @@ class OverlayDelta : public Overlay
         virtual void onSessionChanged()
         {
             // New session: discard the carried-over session-best reference and any in-flight lap.
-            // m_lastLapCompleted must reset too, else the first frame of the new session (where
-            // ir_LapCompleted restarts near 0) would fold the previous session's last lap time in.
+            // The session-best is now sourced purely from the sim's per-car session-best
+            // (CarIdxBestLapTime), which the sim itself resets for the new session, so there is no
+            // local lap-edge state left to clear here.
             m_sessionBestLapTime = 0.0f;
-            m_lastLapCompleted = -1;
             resetLap();
             // Zero the buffer too (parity with onConfigChanged): resetLap() only invalidates the
             // [min,max] range, but the section-bar subtraction reads m_delta directly, so a stale
@@ -278,23 +277,25 @@ class OverlayDelta : public Overlay
             }
 
             // --- Track the session-best lap time (used for the header readout) --------------
-            // Source of truth: the min of our own observed completed laps, seeded/cross-checked
-            // by the sim's per-car best (covers laps run before the overlay started). For the
-            // "best lap" target we instead show the sim's own best-lap time directly.
+            // Single source of truth: the sim's own per-car session-best (CarIdxBestLapTime).
+            // It is session-scoped and validity-filtered, so it tracks the SAME reference lap the
+            // ir_LapDeltaToSessionBestLap channel measures against -- keeping the header time and
+            // the delta trace/readout consistent. A fast but invalid lap (track-limits/off-track)
+            // does not move it, exactly as it must not move the delta's reference.
+            //
+            // We deliberately do NOT fold in ir_LapLastLapTime here: it is the raw last-lap time
+            // (invalid laps included) and would silently drag the header below the real reference,
+            // permanently (the value only ever decreases within a session). For the "best lap"
+            // target we show the sim's own best-lap time directly (also a single sim source).
+            //
+            // CarIdxBestLapTime reads -1 while the player is disconnected; the `> 0` guard holds
+            // the last known time across that transient rather than blanking the header.
             const int playerIdx = ir_session.driverCarIdx;
             if( playerIdx >= 0 && playerIdx < IR_MAX_CARS )
             {
                 const float carBest = ir_CarIdxBestLapTime.getFloat( playerIdx );
-                if( carBest > 0.0f && (m_sessionBestLapTime <= 0.0f || carBest < m_sessionBestLapTime) )
+                if( carBest > 0.0f )
                     m_sessionBestLapTime = carBest;
-            }
-            const int lapCompleted = ir_LapCompleted.getInt();
-            if( lapCompleted != m_lastLapCompleted )
-            {
-                m_lastLapCompleted = lapCompleted;
-                const float last = ir_LapLastLapTime.getFloat();
-                if( last > 0.0f && (m_sessionBestLapTime <= 0.0f || last < m_sessionBestLapTime) )
-                    m_sessionBestLapTime = last;
             }
 
             const float targetLapTime = m_useBest ? ir_LapBestLapTime.getFloat() : m_sessionBestLapTime;
@@ -727,11 +728,17 @@ class OverlayDelta : public Overlay
         // Snapshots m_delta as the ghost candidate for the lap that just ended, if the trace
         // covered (almost) the whole lap and ghost mode is enabled.
         //
-        // ir_LapLastLapTime is read here, at the same frame as the rollover; the sim is
-        // expected to have already latched the completed lap's time by this point (the same
-        // assumption the existing session-best tracker above relies on for ir_LapCompleted).
-        // If the engine updates it a frame late, the ghost would briefly lag one lap behind
-        // for the "best"/"session_best" selection -- cosmetic only, self-corrects next lap.
+        // The "did this lap become the best?" decision is driven by the sim's validity-filtered
+        // best for the SELECTED target (ir_LapBestLapTime for the "best" target, the
+        // CarIdxBestLapTime-tracked m_sessionBestLapTime for "session_best"). The just-completed
+        // lap counts as the new best only when its raw ir_LapLastLapTime matches that filtered
+        // best to the millisecond: an invalid lap reads faster than the best (the sim refuses to
+        // fold it in), so it fails the match and can neither become the ghost-best nor fire the
+        // pulse; a pre-existing external best (a lap we never drove) fails it too.
+        //
+        // These channels are read at the rollover frame; the sim is expected to have latched the
+        // completed lap by then. A one-frame-late engine update would make the ghost lag one lap
+        // -- cosmetic only, self-corrects next lap.
         void captureGhostCandidate()
         {
             if( m_ghostMode == GHOST_OFF )
@@ -749,6 +756,17 @@ class OverlayDelta : public Overlay
                 return;
 
             const float lapTime = ir_LapLastLapTime.getFloat();
+            const float EPS     = 0.001f;   // 1 ms: lap times carry ms precision
+
+            // The sim's validity-filtered best for the SELECTED target. session_best uses
+            // m_sessionBestLapTime, refreshed from CarIdxBestLapTime earlier this frame.
+            const float curBest = m_useBest ? ir_LapBestLapTime.getFloat() : m_sessionBestLapTime;
+
+            // Did THIS just-completed lap set that best? True only when its raw time equals the
+            // filtered best to the millisecond -- which rejects invalid laps (faster than curBest)
+            // and pre-existing external bests (a different lap) alike.
+            const bool thisLapIsBest = lapTime > 0.0f && curBest > 0.0f
+                                     && std::fabs( lapTime - curBest ) <= EPS;
 
             // Update the ghost snapshot for each mode -- both modes fall through to the shared
             // collapse/pulse detection below (neither early-returns), since either can become
@@ -757,56 +775,38 @@ class OverlayDelta : public Overlay
             {
                 m_ghost = m_delta;          // full m_resolution-sized snapshot
             }
-            else // GHOST_BEST ("best" / "session_best", see onConfigChanged comment)
+            // GHOST_BEST ("best" / "session_best"): capture the curve only when this lap actually
+            // achieved a new target best -- so the frozen "best ghost" is always the very lap the
+            // target currently is, and an invalid lap can never become it.
+            else if( thisLapIsBest && delta::bestImproved( curBest, m_ghostBestLapTime, EPS ) )
             {
-                // Keep the snapshot of the completed lap with the smallest lap time seen so far
-                // this run.
-                if( lapTime > 0.0f && (m_ghostBestLapTime <= 0.0f || lapTime < m_ghostBestLapTime) )
-                {
-                    m_ghostBestLapTime = lapTime;
-                    m_ghostBest = m_delta;
+                m_ghostBestLapTime = curBest;
+                m_ghostBest = m_delta;
 
-                    // Cache the ghost's peak |delta| so onUpdate can keep the GHOST_BEST curve in
-                    // frame: the dynamic scale fits both the live lap and this frozen ghost.
-                    // Computed once here at capture (a full-lap snapshot is rare), not per frame.
-                    float m = 0.0f;
-                    for( float d : m_ghostBest )
-                        m = std::max( m, std::fabs( d ) );
-                    m_ghostBestMaxAbs = m;
-                }
+                // Cache the ghost's peak |delta| so onUpdate can keep the GHOST_BEST curve in
+                // frame: the dynamic scale fits both the live lap and this frozen ghost.
+                // Computed once here at capture (a full-lap snapshot is rare), not per frame.
+                float m = 0.0f;
+                for( float d : m_ghostBest )
+                    m = std::max( m, std::fabs( d ) );
+                m_ghostBestMaxAbs = m;
             }
 
             // --- Did the ghost just become the best? (collapse + optional pulse) --------------------
-            // Definition: the ghost's lap time dropped strictly below the target's. Detected as -- this
-            // just-completed lap (which the ghost shows: always in LAST mode, or as the freshly-updated
-            // m_ghostBest in BEST mode) IS the current best AND strictly beat the best known BEFORE this lap.
-            //   * Strict '<' (not '=='): a mere time-tie with a DIFFERENT lap must NOT collapse the ghost.
-            //   * isCurrentBest (lap <= the live target): if the real best is a lap the overlay never
-            //     captured (set before it was enabled, or any external best), the ghost stays shown normally
-            //     until we actually beat it -- it is only "<= curTarget" once this lap really is the fastest.
-            //   * Compared against m_prevTargetLapTime (the baseline as of the previous lap), because the
-            //     live target may already have absorbed this lap, which would make a '< curTarget' test miss.
+            // The just-completed lap is the new best (thisLapIsBest) AND the filtered best strictly
+            // improved over the baseline as of the previous lap (m_prevTargetLapTime). The second
+            // term keeps a degenerate tie (best unchanged) from re-collapsing/re-pulsing every lap,
+            // and the thisLapIsBest term keeps a pre-existing external best from collapsing a lap we
+            // never actually drove.
             {
-                float curTarget = m_useBest ? ir_LapBestLapTime.getFloat() : m_sessionBestLapTime;
-                // Skew guard: on this exact rollover frame the sim's best (ir_LapBestLapTime) or our
-                // session-best tracker may not have folded THIS just-completed lap in yet -- and
-                // ir_LapBestLapTime reads 0 before the very first lap latches. If this lap is at
-                // least as fast as the tracked best, it IS the effective current best, so fold it in.
-                // Without this a genuine first/best lap would have isCurrentBest==false and never
-                // collapse (a permanent miss for GHOST_BEST, whose ghost then stays full-size while
-                // actually being the target).
-                if( lapTime > 0.0f && (curTarget <= 0.0f || lapTime < curTarget) )
-                    curTarget = lapTime;
-                const float EPS = 0.001f;   // 1 ms: lap times carry ms precision
-                const bool isCurrentBest = lapTime > 0.0f && curTarget > 0.0f && lapTime <= curTarget + EPS;
-                const bool becameBest    = isCurrentBest
-                                         && ( m_prevTargetLapTime <= 0.0f || lapTime < m_prevTargetLapTime - EPS );
-                const bool hadPriorBest  = m_prevTargetLapTime > 0.0f;
+                const bool becameBest   = thisLapIsBest
+                                        && delta::bestImproved( curBest, m_prevTargetLapTime, EPS );
+                const bool hadPriorBest = m_prevTargetLapTime > 0.0f;
 
                 // Advance the baseline to the best known now (this lap and/or any external best); monotonic.
-                if( curTarget > 0.0f )
-                    m_prevTargetLapTime = (m_prevTargetLapTime <= 0.0f) ? curTarget
-                                                                        : std::min( m_prevTargetLapTime, curTarget );
+                if( curBest > 0.0f )
+                    m_prevTargetLapTime = (m_prevTargetLapTime <= 0.0f) ? curBest
+                                                                        : std::min( m_prevTargetLapTime, curBest );
 
                 if( becameBest )
                 {
@@ -877,7 +877,6 @@ class OverlayDelta : public Overlay
 
         // Session-best lap time for the header readout (see onUpdate for how it is tracked).
         float m_sessionBestLapTime = 0.0f;
-        int   m_lastLapCompleted = -1;
 
         // --- Ghost mode ------------------------------------------------------------------
         // A ghost is a frozen snapshot of m_delta (size m_resolution) from a previously
