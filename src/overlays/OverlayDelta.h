@@ -463,8 +463,9 @@ class OverlayDelta : public Overlay
 
                 bool open = false;
                 auto edgeCross = [&]( int b0, int b1, float E )->float2 {
-                    const float d0 = valAt(b0), d1 = valAt(b1);
-                    const float t  = (E - d0) / (d1 - d0);   // d1 != d0 guaranteed (one is strictly outside)
+                    // delta::edgeCrossT gives t in [0,1] where the d0->d1 segment hits edge E
+                    // (one of +/-R); map that onto screen x. See delta_logic.h for the invariant.
+                    const float t = delta::edgeCrossT( valAt(b0), valAt(b1), E );
                     return float2( xOf(b0) + (xOf(b1) - xOf(b0)) * t, yOf(E) );
                 };
 
@@ -504,13 +505,12 @@ class OverlayDelta : public Overlay
             // colour). yOf()'s clamp keeps a run pinned to the frame edge where the trace leaves the band.
             auto drawSignRunFills = [&]( int s, int e, auto&& valAt, auto&& fillColorFor )
             {
-                int rs = s;
-                while( rs <= e )
+                // delta::signRuns splits [s,e] into maximal one-sign runs (the pure logic, unit
+                // tested); each run becomes one filled polygon from the centre up/down to the curve.
+                for( const auto& run : delta::signRuns( s, e, valAt ) )
                 {
+                    const int rs = run.first, re = run.second;
                     const bool loss = valAt(rs) > 0.0f;
-                    int re = rs;
-                    while( re + 1 <= e && (valAt(re+1) > 0.0f) == loss )
-                        ++re;
                     Microsoft::WRL::ComPtr<ID2D1PathGeometry1> fillPath;
                     Microsoft::WRL::ComPtr<ID2D1GeometrySink>  fillSink;
                     HRCHECK( m_d2dFactory->CreatePathGeometry( &fillPath ) );
@@ -523,7 +523,6 @@ class OverlayDelta : public Overlay
                     HRCHECK( fillSink->Close() );
                     m_brush->SetColor( fillColorFor(loss) );
                     m_renderTarget->FillGeometry( fillPath.Get(), m_brush.Get() );
-                    rs = re + 1;
                 }
             };
 

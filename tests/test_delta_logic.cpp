@@ -9,6 +9,7 @@
 #include <vector>
 #include <algorithm>
 #include <cmath>
+#include <utility>
 
 #include "doctest.h"
 #include "delta_logic.h"
@@ -16,6 +17,8 @@
 using delta::buildLadder;
 using delta::pickTargetRung;
 using delta::easeRange;
+using delta::edgeCrossT;
+using delta::signRuns;
 using delta::STEP_MERGE_RATIO;
 
 // ----------------------------------------------------------------------------------
@@ -276,4 +279,147 @@ TEST_CASE("easeRange: at target stays at target (zero step)")
     // target == range: down branch (target > range is false), step = 0.
     CHECK( easeRange( 3.0f, 3.0f, 1.0f, false ) == doctest::Approx( 3.0f ) );
     CHECK( easeRange( 3.0f, 3.0f, 1.0f, true )  == doctest::Approx( 3.0f ) );
+}
+
+// ----------------------------------------------------------------------------------
+// edgeCrossT
+// ----------------------------------------------------------------------------------
+
+TEST_CASE("edgeCrossT: midpoint crossing through zero")
+{
+    // Symmetric segment -10 -> 10 crossing E=0: lands exactly halfway.
+    CHECK( edgeCrossT( -10.0f, 10.0f, 0.0f ) == doctest::Approx( 0.5f ) );
+}
+
+TEST_CASE("edgeCrossT: leaving the band upward (in -> out at +R)")
+{
+    // d0=5 inside, d1=15 outside, edge E=R=10: t=(10-5)/(15-5)=0.5.
+    CHECK( edgeCrossT( 5.0f, 15.0f, 10.0f ) == doctest::Approx( 0.5f ) );
+    // Asymmetric: d0=2 -> d1=12 against E=10: t=(10-2)/(12-2)=0.8.
+    CHECK( edgeCrossT( 2.0f, 12.0f, 10.0f ) == doctest::Approx( 0.8f ) );
+}
+
+TEST_CASE("edgeCrossT: entering the band (out -> in) is symmetric to leaving")
+{
+    // d0=15 outside, d1=5 inside, E=10: t=(10-15)/(5-15)=0.5.
+    CHECK( edgeCrossT( 15.0f, 5.0f, 10.0f ) == doctest::Approx( 0.5f ) );
+}
+
+TEST_CASE("edgeCrossT: crossing the negative edge -R")
+{
+    // d0=-5 inside, d1=-15 outside, E=-R=-10: t=(-10-(-5))/(-15-(-5))=(-5)/(-10)=0.5.
+    CHECK( edgeCrossT( -5.0f, -15.0f, -10.0f ) == doctest::Approx( 0.5f ) );
+}
+
+TEST_CASE("edgeCrossT: t reconstructs the edge value (d0 + (d1-d0)*t == E)")
+{
+    const float d0 = 3.0f, d1 = 41.0f, E = 10.0f;
+    const float t  = edgeCrossT( d0, d1, E );
+    CHECK( d0 + (d1 - d0) * t == doctest::Approx( E ) );
+}
+
+TEST_CASE("edgeCrossT: endpoints give t=0 and t=1")
+{
+    CHECK( edgeCrossT( 10.0f, 20.0f, 10.0f ) == doctest::Approx( 0.0f ) );  // E==d0
+    CHECK( edgeCrossT( 10.0f, 20.0f, 20.0f ) == doctest::Approx( 1.0f ) );  // E==d1
+}
+
+TEST_CASE("edgeCrossT: result is clamped to [0,1] for out-of-segment edges")
+{
+    CHECK( edgeCrossT( 0.0f, 2.0f, 10.0f ) == doctest::Approx( 1.0f ) );   // raw t=5 -> clamp 1
+    CHECK( edgeCrossT( 0.0f, 2.0f, -4.0f ) == doctest::Approx( 0.0f ) );   // raw t=-2 -> clamp 0
+}
+
+TEST_CASE("edgeCrossT: zero-length segment (d0==d1) returns 0 instead of dividing")
+{
+    CHECK( edgeCrossT( 7.0f, 7.0f, 10.0f ) == doctest::Approx( 0.0f ) );
+}
+
+// ----------------------------------------------------------------------------------
+// signRuns
+// ----------------------------------------------------------------------------------
+
+// Convenience: run-find over a whole vector via an index accessor lambda.
+static std::vector<std::pair<int,int>> runsOf( const std::vector<float>& v )
+{
+    return signRuns( 0, (int)v.size() - 1, [&]( int i ){ return v[i]; } );
+}
+
+TEST_CASE("signRuns: all gain (values <= 0) is a single run")
+{
+    const std::vector<float> v = { -1.0f, -2.0f, 0.0f, -3.0f };  // 0 counts as gain
+    const auto r = runsOf( v );
+    REQUIRE( r.size() == 1 );
+    CHECK( r[0] == std::make_pair( 0, 3 ) );
+}
+
+TEST_CASE("signRuns: all loss (values > 0) is a single run")
+{
+    const std::vector<float> v = { 1.0f, 2.0f, 3.0f };
+    const auto r = runsOf( v );
+    REQUIRE( r.size() == 1 );
+    CHECK( r[0] == std::make_pair( 0, 2 ) );
+}
+
+TEST_CASE("signRuns: alternating signs split into singleton runs")
+{
+    const std::vector<float> v = { 1.0f, -1.0f, 1.0f, -1.0f };
+    const auto r = runsOf( v );
+    REQUIRE( r.size() == 4 );
+    CHECK( r[0] == std::make_pair( 0, 0 ) );
+    CHECK( r[1] == std::make_pair( 1, 1 ) );
+    CHECK( r[2] == std::make_pair( 2, 2 ) );
+    CHECK( r[3] == std::make_pair( 3, 3 ) );
+}
+
+TEST_CASE("signRuns: mixed runs are maximal")
+{
+    const std::vector<float> v = { 2.0f, 1.0f, -1.0f, -2.0f, -3.0f, 5.0f };
+    const auto r = runsOf( v );
+    REQUIRE( r.size() == 3 );
+    CHECK( r[0] == std::make_pair( 0, 1 ) );  // loss
+    CHECK( r[1] == std::make_pair( 2, 4 ) );  // gain
+    CHECK( r[2] == std::make_pair( 5, 5 ) );  // loss
+}
+
+TEST_CASE("signRuns: zero is grouped with the gain run (0 > 0 is false)")
+{
+    const std::vector<float> v = { 0.0f, -1.0f, 2.0f };
+    const auto r = runsOf( v );
+    REQUIRE( r.size() == 2 );
+    CHECK( r[0] == std::make_pair( 0, 1 ) );  // {0,-1} both non-loss
+    CHECK( r[1] == std::make_pair( 2, 2 ) );  // {2} loss
+}
+
+TEST_CASE("signRuns: single element yields one run")
+{
+    const std::vector<float> v = { -4.0f };
+    const auto r = runsOf( v );
+    REQUIRE( r.size() == 1 );
+    CHECK( r[0] == std::make_pair( 0, 0 ) );
+}
+
+TEST_CASE("signRuns: inverted range (e < s) yields no runs")
+{
+    const std::vector<float> v = { 1.0f, -1.0f, 1.0f };
+    const auto r = signRuns( 2, 1, [&]( int i ){ return v[i]; } );
+    CHECK( r.empty() );
+}
+
+TEST_CASE("signRuns: respects a sub-range [s,e]")
+{
+    const std::vector<float> v = { 1.0f, -1.0f, -2.0f, 3.0f, 4.0f };
+    const auto r = signRuns( 1, 3, [&]( int i ){ return v[i]; } );
+    REQUIRE( r.size() == 2 );
+    CHECK( r[0] == std::make_pair( 1, 2 ) );  // gain within sub-range
+    CHECK( r[1] == std::make_pair( 3, 3 ) );  // loss
+}
+
+TEST_CASE("signRuns: a positive scale of the accessor does not change the runs")
+{
+    // The collapsing ghost feeds ghost[b]*cm with cm>0; runs must be identical to raw.
+    const std::vector<float> v = { 2.0f, 1.0f, -1.0f, -3.0f, 5.0f };
+    const auto raw    = signRuns( 0, (int)v.size()-1, [&]( int i ){ return v[i]; } );
+    const auto scaled = signRuns( 0, (int)v.size()-1, [&]( int i ){ return v[i] * 0.25f; } );
+    CHECK( raw == scaled );
 }

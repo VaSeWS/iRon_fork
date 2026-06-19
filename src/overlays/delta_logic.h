@@ -34,6 +34,7 @@ SOFTWARE.
 #include <vector>
 #include <algorithm>
 #include <cmath>
+#include <utility>
 
 namespace delta
 {
@@ -139,5 +140,51 @@ namespace delta
 
         const float k = ( target > range ) ? kUp : kDown;
         return range + ( target - range ) * k;
+    }
+
+    // Parametric crossing point where a segment running from value d0 to d1 crosses the
+    // horizontal edge E. The Delta overlay uses this to clip the trace exactly at a visible-
+    // scale boundary (E == +range or -range) so the line meets the fill edge and then vanishes
+    // beyond it, rather than being clamped flat along the frame edge.
+    //
+    // Returns t such that d0 + (d1-d0)*t == E, i.e. t = (E-d0)/(d1-d0); the caller maps t onto
+    // screen x. Call sites only invoke this when d0 and d1 straddle E (one strictly outside the
+    // band, one inside), so the denominator is non-zero and the exact t lands in [0,1]. The
+    // zero-denominator guard and the [0,1] clamp are pure hardening against degenerate input /
+    // floating-point error -- at valid call sites they never change the result.
+    inline float edgeCrossT( float d0, float d1, float E )
+    {
+        const float denom = d1 - d0;
+        if( denom == 0.0f )
+            return 0.0f;
+        const float t = (E - d0) / denom;
+        return std::min( 1.0f, std::max( 0.0f, t ) );
+    }
+
+    // Split the inclusive index range [s,e] into maximal runs over which the sign class
+    // ( value > 0 ) is constant, where the value at index b is valAt(b). The Delta overlay
+    // fills the signed area between a trace and the centre line with one polygon per run, so
+    // gain (value <= 0) and loss (value > 0) stretches get their own colour. Zero counts as a
+    // gain run ( 0 > 0 is false ), matching the overlay's loss = value > 0 convention.
+    //
+    // Returns the runs as [first,last] inclusive index pairs in ascending order; an empty or
+    // inverted range ( e < s ) yields no runs. valAt is any callable int -> float, so callers
+    // can feed a raw buffer or a transformed view (e.g. the collapsing ghost's ghost[b]*cm) --
+    // a positive scale never changes a sample's sign, so the runs are identical either way.
+    template<class ValAt>
+    inline std::vector<std::pair<int,int>> signRuns( int s, int e, ValAt&& valAt )
+    {
+        std::vector<std::pair<int,int>> runs;
+        int rs = s;
+        while( rs <= e )
+        {
+            const bool loss = valAt(rs) > 0.0f;
+            int re = rs;
+            while( re + 1 <= e && (valAt(re+1) > 0.0f) == loss )
+                ++re;
+            runs.push_back( std::make_pair( rs, re ) );
+            rs = re + 1;
+        }
+        return runs;
     }
 }
