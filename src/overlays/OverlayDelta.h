@@ -120,7 +120,7 @@ class OverlayDelta : public Overlay
             // before choosing a ladder step). rescale_speed scales the per-frame easing rate
             // (1.0 = the tuned default; <1 calmer, >1 snappier), clamped to a sane band.
             m_headroom     = std::max( 0.0f, g_cfg.getFloat( m_name, "range_headroom", 0.08f ) );
-            m_rescaleSpeed = std::min( 10.0f, std::max( 0.1f, g_cfg.getFloat( m_name, "rescale_speed", 1.0f ) ) );
+            m_rescaleSpeed = std::clamp( g_cfg.getFloat( m_name, "rescale_speed", 1.0f ), 0.1f, 10.0f );
 
             // In performance_mode_30hz each overlay updates every other frame (~30Hz), so the
             // per-frame easing constants below (kUp/kDown, tuned for ~60Hz) would otherwise reach
@@ -199,7 +199,7 @@ class OverlayDelta : public Overlay
             // any in-flight lap state would now be inconsistent with the new bucket count.
             // Clamp both ends: floor keeps the geometry loop sane, ceiling prevents a typo in
             // config.json from allocating gigabytes / walking a huge per-frame loop.
-            m_resolution = std::min( 5000, std::max( 16, g_cfg.getInt( m_name, "trace_resolution", 300 ) ) );
+            m_resolution = std::clamp( g_cfg.getInt( m_name, "trace_resolution", 300 ), 16, 5000 );
             m_delta.assign( m_resolution, 0.0f );
             resetLap();
             m_sessionBestLapTime = 0.0f;
@@ -300,7 +300,7 @@ class OverlayDelta : public Overlay
             const float targetLapTime = m_useBest ? ir_LapBestLapTime.getFloat() : m_sessionBestLapTime;
 
             // --- Advance the distance-indexed trace -----------------------------------------
-            const float lapPct = std::min( 1.0f, std::max( 0.0f, ir_LapDistPct.getFloat() ) );
+            const float lapPct = std::clamp( ir_LapDistPct.getFloat(), 0.0f, 1.0f );
 
             // Detect a lap rollover by a large backwards jump in lap distance and clear the
             // current-lap trace so the new lap starts from a clean buffer. Assumes the only
@@ -439,7 +439,7 @@ class OverlayDelta : public Overlay
                 // Clamp to ±m_range. With the dynamic scale this rarely bites -- only in the
                 // brief frames where target > m_range while the up-easing is still catching up
                 // to a sharp new peak -- but it still guards the trace from drawing off-frame.
-                const float c = std::min( m_range, std::max( -m_range, d ) );
+                const float c = std::clamp( d, -m_range, m_range );
                 return center - c * scale;          // d>0 (loss) -> above center, d<0 (gain) -> below
             };
 
