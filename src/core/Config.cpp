@@ -69,6 +69,7 @@ bool Config::load()
 
     m_pj = pjval.get<picojson::object>();
     m_hasChanged = false;
+    m_dirty = false;  // in-memory state now matches what's on disk
     return true;
 }
 
@@ -81,6 +82,9 @@ bool Config::save()
         char s[1024];
         GetCurrentDirectory( sizeof(s), s );
         printf("Could not save config file! Please make sure iRon is started from a directory for which it has write permissions. The current directory is: %s.\n", s);
+    }
+    else {
+        m_dirty = false;  // successfully flushed to disk; leave dirty set on failure to retry later
     }
     return ok;
 }
@@ -190,20 +194,25 @@ void Config::setInt( const std::string& component, const std::string& key, int v
     picojson::object& pjcomp = m_pj[component].get<picojson::object>();
     double d = double(v);
     pjcomp[key].set<double>( d );
+    m_dirty = true;
 }
 
 void Config::setBool( const std::string& component, const std::string& key, bool v )
 {
     picojson::object& pjcomp = m_pj[component].get<picojson::object>();
     pjcomp[key].set<bool>( v );
+    m_dirty = true;
 }
 
 picojson::object& Config::getOrInsertComponent( const std::string& component, bool* existed )
 {
     auto it = m_pj.insert(std::make_pair(component,picojson::object()));
-    
+
     if( existed )
         *existed = !it.second;
+
+    if( it.second )
+        m_dirty = true;  // a new component was inserted, so memory now differs from disk
 
     return it.first->second.get<picojson::object>();
 }
@@ -216,6 +225,9 @@ picojson::value& Config::getOrInsertValue( const std::string& component, const s
 
     if( existed )
         *existed = !it.second;
+
+    if( it.second )
+        m_dirty = true;  // a new key was inserted (e.g. a param added in a new version)
 
     return it.first->second;
 }
