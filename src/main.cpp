@@ -74,8 +74,9 @@ static void registerHotkeys()
     if( parseHotkey( g_cfg.getString("OverlayStandings","toggle_hotkey","ctrl-space"),&mod,&vk) )
         RegisterHotKey( NULL, (int)Hotkey::Standings, mod, vk );
 
-    if( parseHotkey( g_cfg.getString("OverlayDDU","toggle_hotkey","ctrl-1"),&mod,&vk) )
-        RegisterHotKey( NULL, (int)Hotkey::DDU, mod, vk );
+    // DDU overlay disabled (kept for future use) -- hotkey not registered.
+    //if( parseHotkey( g_cfg.getString("OverlayDDU","toggle_hotkey","ctrl-1"),&mod,&vk) )
+    //    RegisterHotKey( NULL, (int)Hotkey::DDU, mod, vk );
 
     if( parseHotkey( g_cfg.getString("OverlayInputs","toggle_hotkey","ctrl-2"),&mod,&vk) )
         RegisterHotKey( NULL, (int)Hotkey::Inputs, mod, vk );
@@ -83,8 +84,9 @@ static void registerHotkeys()
     if( parseHotkey( g_cfg.getString("OverlayRelative","toggle_hotkey","ctrl-3"),&mod,&vk) )
         RegisterHotKey( NULL, (int)Hotkey::Relative, mod, vk );
 
-    if( parseHotkey( g_cfg.getString("OverlayCover","toggle_hotkey","ctrl-4"),&mod,&vk) )
-        RegisterHotKey( NULL, (int)Hotkey::Cover, mod, vk );
+    // Cover overlay disabled (kept for future use) -- hotkey not registered.
+    //if( parseHotkey( g_cfg.getString("OverlayCover","toggle_hotkey","ctrl-4"),&mod,&vk) )
+    //    RegisterHotKey( NULL, (int)Hotkey::Cover, mod, vk );
 
     if( parseHotkey( g_cfg.getString("OverlayDelta","toggle_hotkey","ctrl-5"),&mod,&vk) )
         RegisterHotKey( NULL, (int)Hotkey::Delta, mod, vk );
@@ -132,10 +134,12 @@ int main()
     printf("Current hotkeys:\n");
     printf("    Move and resize overlays:     %s\n", g_cfg.getString("General","ui_edit_hotkey","").c_str() );
     printf("    Toggle standings overlay:     %s\n", g_cfg.getString("OverlayStandings","toggle_hotkey","").c_str() );
-    printf("    Toggle DDU overlay:           %s\n", g_cfg.getString("OverlayDDU","toggle_hotkey","").c_str() );
+    // DDU overlay disabled (kept for future use) -- not advertised.
+    //printf("    Toggle DDU overlay:           %s\n", g_cfg.getString("OverlayDDU","toggle_hotkey","").c_str() );
     printf("    Toggle inputs overlay:        %s\n", g_cfg.getString("OverlayInputs","toggle_hotkey","").c_str() );
     printf("    Toggle relative overlay:      %s\n", g_cfg.getString("OverlayRelative","toggle_hotkey","").c_str() );
-    printf("    Toggle cover overlay:         %s\n", g_cfg.getString("OverlayCover","toggle_hotkey","").c_str() );
+    // Cover overlay disabled (kept for future use) -- not advertised.
+    //printf("    Toggle cover overlay:         %s\n", g_cfg.getString("OverlayCover","toggle_hotkey","").c_str() );
     printf("    Toggle delta overlay:         %s\n", g_cfg.getString("OverlayDelta","toggle_hotkey","").c_str() );
     printf("\niRon will generate a file called \'config.json\' in its current directory. This file\n"\
            "stores your settings. You can edit the file at any time, even while iRon is running,\n"\
@@ -147,11 +151,13 @@ int main()
 
     // Create overlays
     std::vector<Overlay*> overlays;
-    overlays.push_back( new OverlayCover() );
+    // DDU and Cover overlays are disabled (not instantiated) but their code is kept for future use.
+    // To re-enable, uncomment the matching push_back, hotkey registration and help-text lines.
+    //overlays.push_back( new OverlayCover() );
     overlays.push_back( new OverlayRelative() );
     overlays.push_back( new OverlayInputs() );
     overlays.push_back( new OverlayStandings() );
-    overlays.push_back( new OverlayDDU() );
+    //overlays.push_back( new OverlayDDU() );
     overlays.push_back( new OverlayDelta() );
 #ifdef _DEBUG
     overlays.push_back( new OverlayDebug() );
