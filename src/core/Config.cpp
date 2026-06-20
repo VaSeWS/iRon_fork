@@ -191,7 +191,7 @@ std::vector<std::string> Config::getStringVec( const std::string& component, con
 
 void Config::setInt( const std::string& component, const std::string& key, int v )
 {
-    picojson::object& pjcomp = m_pj[component].get<picojson::object>();
+    picojson::object& pjcomp = getOrInsertComponent( component );
     double d = double(v);
     pjcomp[key].set<double>( d );
     m_dirty = true;
@@ -199,7 +199,7 @@ void Config::setInt( const std::string& component, const std::string& key, int v
 
 void Config::setBool( const std::string& component, const std::string& key, bool v )
 {
-    picojson::object& pjcomp = m_pj[component].get<picojson::object>();
+    picojson::object& pjcomp = getOrInsertComponent( component );
     pjcomp[key].set<bool>( v );
     m_dirty = true;
 }

@@ -274,7 +274,8 @@ class TextCache
             if( it == m_cache.end() )
             {
                 m_factory->CreateTextLayout( str, len, textFormat, width, fontSize*2, &textLayout );
-                m_cache.insert( std::make_pair(hash, textLayout) );
+                if( textLayout )
+                    m_cache.insert( std::make_pair(hash, textLayout) );
             }
             else
             {
@@ -293,6 +294,10 @@ inline float2 computeTextExtent( const wchar_t* str, IDWriteFactory* factory, ID
     IDWriteTextLayout* textLayout = nullptr;
 
     factory->CreateTextLayout( str, (int)wcslen(str), textFormat, 99999, 99999, &textLayout );
+
+    if( !textLayout )
+        return float2( 0, 0 );
+
     DWRITE_TEXT_METRICS m = {};
     textLayout->GetMetrics( &m );
 
