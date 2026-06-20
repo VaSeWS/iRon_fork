@@ -11,10 +11,8 @@ The project's code base aims to be small, easy to modify, and free of external d
 - [Where to Download](#where-to-download)
 - [Overlays](#overlays)
   - [*Relative*](#relative)
-  - [*DDU*](#ddu)
   - [*Inputs*](#inputs)
   - [*Standings*](#standings)
-  - [*Cover*](#cover)
   - [*Delta*](#delta)
 - [Installing & Running](#installing--running)
 - [Configuration](#configuration)
@@ -25,7 +23,7 @@ The project's code base aims to be small, easy to modify, and free of external d
 
 ## Where to Download
 
-The latest binary release can be found [here](https://github.com/lespalt/iRon/releases/latest).
+The latest binary release can be found [here](https://github.com/VaSeWS/iRon_fork/releases/latest).
 
 ## Overlays
 
@@ -36,14 +34,6 @@ Like the *Relative* box in iRacing, but with additional information such as lice
 At the top is an optional minimap (`minimap_enabled`). It can be set to either relative mode (own car fixed in the center) or absolute mode (start/finish line fixed in the center) via the `minimap_is_relative` parameter: `true` for relative mode, `false` for absolute mode.
 
 ![relative](docs/screenshots/relative.png)
-
-### *DDU*
-
-A dashboard that concentrates important pieces of information for which you would otherwise have to flip through various boxes in iRacing.
-
-The fuel calculator shows the estimated remaining laps, remaining amount of fuel, estimated fuel used per lap, estimated _additional_ fuel required to finish the race, and the fuel amount that is scheduled to be added on the next pit stop. To compute the estimated fuel consumption, the last 4 laps under green and without pit stops are taken into account, and a 5% safety margin is added. These parameters can be customized.
-
-![ddu](docs/screenshots/ddu.png)
 
 ### *Inputs*
 
@@ -58,10 +48,6 @@ Shows the standings of the entire field, including safety rating, iRating, and n
 Like the "Relative" overlay, this will highlight buddies in green (Dale Jr. in the example below).
 
 ![standings](docs/screenshots/standings.png)
-
-### *Cover*
-
-No screenshot for this one, because all it is is a blank rectangle. Can be useful to cover up distracting in-game dashboards, like the one in the next-gen NASCAR.
 
 ### *Delta*
 
