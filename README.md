@@ -17,9 +17,38 @@ The project's code base aims to be small, easy to modify, and free of external d
 - [Installing & Running](#installing--running)
 - [Configuration](#configuration)
 - [Building from source](#building-from-source)
+- [AI review](#ai-review-experimental)
 - [Dependencies](#dependencies)
 
 ---
+
+## AI review (experimental)
+
+AI review использует [`memory-bank/`](memory-bank/) и allowlist исходного кода как локальный lexical RAG-корпус: выбираются совпадающие целые фрагменты, это не векторный поиск и не полный обзор всего проекта. Памятка хранит проектные контракты и проверенные review-правила; модель может пропустить дефект, ошибиться или предложить неподходящее изменение. Результат требует проверки человеком и не гарантирует полноту/корректность.
+
+### Локальные команды
+
+Команды запускаются из корня репозитория. `-C` задаёт модулю рабочую директорию, поэтому `"$PWD"` раскрывается shell до смены директории:
+
+```sh
+go -C tools/ai-review run . hash -root "$PWD"
+go -C tools/ai-review run . index -root "$PWD" -sha "$(git rev-parse HEAD)" -out /tmp/iron-index.json
+go -C tools/ai-review run . search -index /tmp/iron-index.json -query "delta scale ghost" -top 6
+go -C tools/ai-review run . review -root "$PWD" -index /tmp/iron-index.json \
+  -repo VaSeWS/iRon_fork -pr 123 -base BASE_SHA -head HEAD_SHA \
+  -out /tmp/iron-review.md
+```
+
+`hash` печатает только SHA-256 идентификатор allowlisted corpus. `index` сохраняет JSON и печатает сводку hash/revision/chunks/files/size; `search` печатает полные выбранные фрагменты с путями и строками. `review` использует точные base/head SHA, валидирует соответствие индекса корпусу base и по умолчанию только пишет отчет. Для публикации комментария добавьте `-publish`; при отсутствии `-model` используется `qwen/qwen3.8-27b`. Индекс имеет версию, digest целостности и hash содержимого/настроек корпуса; `source_sha` — метаданные, а не часть corpus identity. Digest обнаруживает повреждение, но сам по себе не аутентифицирует индекс.
+
+### GitHub Actions и данные
+
+Review job получает Groq credential только из GitHub Secret `GROQ_API_KEY`; локально ключ передаётся через одноимённую переменную окружения. Для GitHub API локальным командам review нужны `GH_TOKEN` или `GITHUB_TOKEN`. Не помещайте ключи в аргументы, файлы или вывод. Используется выбранная модель Groq без автоматических повторов или fallback. Изменённый код, diff и выбранные фрагменты памяти отправляются провайдеру Groq для генерации; не используйте этот workflow с данными, которые нельзя ему передавать. Автоматизация не исполняет код PR: checkout и reviewer берутся с base, а Windows CI — отдельная проверка. При этом авторы с правом записи в этот же репозиторий доверены относительно секрета: они могут изменить workflow и получить доступ к нему; защита fork PR не изолирует секрет от same-repo writers.
+
+Для любого corpus hash индекс имеет имя `rag-index-v1-HASH`. Индексный workflow на `main` сначала ищет и повторно использует совместимый артефакт, а при отсутствии создаёт новый. Review workflow принимает только артефакт успешного `rag-index.yml` run для этого репозитория, ветки `main` и события `push`/`workflow_dispatch`; PR не может предоставить свой индекс. Артефакты хранятся 90 дней. Индекс содержит версию и digest целостности; corpus hash включает содержимое и параметры формата, но не `source_sha`. Digest обнаруживает повреждение, не аутентифицирует индекс; доверие происхождению обеспечивает проверка run/репозитория/события.
+
+Review action с результатами пишет сводку индекса и selected source provenance в log; review Markdown сохраняется только в runner-temp как `review.md`, workflow не загружает его отдельным artifact. Локально `-out` задаёт путь отчёта. Если действующего индекса нет, вручную пересоберите его командой `gh workflow run rag-index.yml --repo VaSeWS/iRon_fork --ref main`. Публикация обновляет только маркированный комментарий самого reviewer и сверяет base/head SHA перед записью, но GitHub не предоставляет атомарную защиту от гонки между проверкой и записью.
+
 
 ## Where to Download
 

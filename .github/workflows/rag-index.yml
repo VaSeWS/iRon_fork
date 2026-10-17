@@ -1,0 +1,96 @@
+name: rag-index
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'README.md'
+      - 'memory-bank/**/*.md'
+      - 'memory-bank/*.md'
+      - 'src/**/*.cpp'
+      - 'src/**/*.h'
+      - 'src/**/*.hpp'
+      - 'tests/**/*.cpp'
+      - 'tests/**/*.h'
+      - 'tests/**/*.hpp'
+      - 'tools/ai-review/**'
+      - '.github/workflows/rag-index.yml'
+      - '.github/workflows/ai-review.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  index:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout trusted main revision
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: tools/ai-review/go.mod
+          cache-dependency-path: tools/ai-review/go.mod
+
+      - name: Build trusted index CLI
+        run: go -C tools/ai-review build -o "$RUNNER_TEMP/ai-review" .
+
+      - name: Calculate corpus hash
+        id: corpus
+        run: echo "hash=$("$RUNNER_TEMP/ai-review" hash -root .)" >> "$GITHUB_OUTPUT"
+
+      - name: Reuse existing successful index
+        id: reuse
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          python3 tools/ai-review/artifact.py find --repo VaSeWS/iRon_fork --hash '${{ steps.corpus.outputs.hash }}' > "$RUNNER_TEMP/artifact.json"
+          if python3 -c 'import json,sys; sys.exit(0 if json.load(open(sys.argv[1]))["found"] else 1)' "$RUNNER_TEMP/artifact.json"; then
+            python3 tools/ai-review/artifact.py download --repo VaSeWS/iRon_fork --hash '${{ steps.corpus.outputs.hash }}' --out "$RUNNER_TEMP/index.json"
+            echo 'reused=true' >> "$GITHUB_OUTPUT"
+          else
+            echo 'reused=false' >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Build index artifact
+        if: steps.reuse.outputs.reused != 'true'
+        run: |
+          "$RUNNER_TEMP/ai-review" index -root . -sha "$GITHUB_SHA" -out "$RUNNER_TEMP/index.json"
+
+      - name: Upload versioned index
+        if: steps.reuse.outputs.reused != 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: rag-index-v1-${{ steps.corpus.outputs.hash }}
+          path: ${{ runner.temp }}/index.json
+          if-no-files-found: error
+          retention-days: 90
+
+      - name: Write index summary
+        env:
+          CORPUS_HASH: ${{ steps.corpus.outputs.hash }}
+          REUSED: ${{ steps.reuse.outputs.reused }}
+        run: |
+          SIZE="$(stat -c %s "$RUNNER_TEMP/index.json") bytes"
+          read -r FILES CHUNKS < <(python3 - "$RUNNER_TEMP/index.json" <<'PY'
+          import json, sys
+          data = json.load(open(sys.argv[1], encoding="utf-8"))
+          chunks = data.get("chunks", [])
+          print(len({chunk["path"] for chunk in chunks}), len(chunks))
+          PY
+          )
+          {
+            echo '## RAG index'
+            echo "- Corpus hash: \`$CORPUS_HASH\`"
+            echo "- Files: $FILES"
+            echo "- Chunks: $CHUNKS"
+            echo "- Index size: $SIZE"
+            echo "- Reused existing artifact: $REUSED"
+          } >> "$GITHUB_STEP_SUMMARY"
