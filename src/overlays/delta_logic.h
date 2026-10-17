@@ -107,7 +107,7 @@ namespace delta
 
         // Smallest rung >= needed; if needed exceeds the top rung, clip to the top
         // (a brief over-range on an extreme spike is acceptable, see yOf's clamp).
-        float target = ladder.back();
+        float target = ladder.front();
         for( float s : ladder ) { if( s >= needed ) { target = s; break; } }
         return target;
     }
